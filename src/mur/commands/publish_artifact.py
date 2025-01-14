@@ -4,9 +4,9 @@ from pathlib import Path
 import click
 
 from ..adapters import PrivateRegistryAdapter, PublicRegistryAdapter
-from ..core.packaging import BuildError, PackageBuilder, PackageConfig
+from ..core.packaging import ArtifactManifest, normalize_package_name
 from ..utils.constants import MURMUR_INDEX_URL, MURMURRC_PATH
-from ..utils.error_handler import CodeError
+from ..utils.error_handler import MurError
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
@@ -26,74 +26,73 @@ class PublishCommand(ArtifactCommand):
             verbose (bool): Whether to enable verbose output. Defaults to False.
 
         Raises:
-            click.ClickException: If the artifact type in murmur.yaml is invalid.
-        """
-        # Fix Deprioritize to end of __init__??
-        super().__init__('publish', verbose)
-
-        # Load config and determine artifact type
-        self.config = self._load_murmur_yaml_from_package()
-        self.artifact_type = self.config.type
-
-        if self.artifact_type not in ['agent', 'tool']:
-            raise click.ClickException(
-                f"Invalid artifact type '{self.artifact_type}' in murmur.yaml. " "Must be either 'agent' or 'tool'."
-            )
-
-    def _build_package(self) -> tuple[Path, list[str]]:
-        """Build the package for publishing.
-
-        Returns:
-            tuple[Path, list[str]]: A tuple containing:
-                - dist_directory (Path): Directory containing the built files
-                - package_files (list[str]): List of built package filenames
-
-        Raises:
-            click.ClickException: If the package build process fails.
+            MurError: If the artifact type in murmur.yaml is invalid.
         """
         try:
-            builder = PackageBuilder(self.current_dir, self.verbose)
-            result = builder.build(self.artifact_type)
-            logger.debug(f'Built package files: {result.package_files}')
-            return result.dist_dir, result.package_files
-        except BuildError as e:
-            raise click.ClickException(f'Package build failed: {e}')
+            super().__init__('publish', verbose)
 
-    def _publish_files(self, config: PackageConfig, dist_dir: Path, package_files: list[str]) -> None:
-        """Publish built package files to registry.
+            # Load manifest and determine artifact type
+            try:
+                self.manifest = self._load_murmur_yaml_from_artifact()
+                self.artifact_type = self.manifest.type
+            except MurError as e:
+                e.handle()
+
+            if self.artifact_type not in ['agent', 'tool']:
+                raise MurError(
+                    code=207,
+                    message=f"Invalid artifact type '{self.artifact_type}' in murmur.yaml",
+                    detail="Must be either 'agent' or 'tool'."
+                )
+        except Exception as e:
+            if not isinstance(e, MurError):
+                raise MurError(code=100, message=str(e))
+            raise
+
+    def _publish_files(self, manifest: ArtifactManifest, dist_dir: Path, artifact_files: list[str]) -> None:
+        """Publish built artifact files to registry.
 
         Args:
-            config (PackageConfig): Package configuration containing metadata
+            manifest (ArtifactManifest): Artifact manifest containing metadata
             dist_dir (Path): Directory containing built files
-            package_files (list[str]): List of package files to publish
-
-        Raises:
-            click.ClickException: If the publishing process fails
-            CodeError: If there's an error during the publishing process
+            artifact_files (list[str]): List of artifact files to publish
         """
         try:
-            for package_file in package_files:
-                file_path = dist_dir / package_file
-                if self.verbose:
-                    logger.info(f'Publishing {package_file}...')
+            if self.verbose:
+                logger.info('Publishing artifact...')
 
-                self.registry.publish_artifact(
-                    artifact_type=self.artifact_type,
-                    name=config.name,
-                    version=config.version,
-                    description=config.description,
-                    metadata=config.metadata,
-                    file_path=file_path,
-                )
-        except CodeError as e:
+            manifest.type = self.artifact_type
+            registered_artifact = self.registry.publish_artifact(manifest)
+
+            # Match and upload files using signed URLs
+            for signed_url_info in registered_artifact.get('signed_upload_urls', []):
+                file_type = signed_url_info.get('file_type')
+                signed_url = signed_url_info.get('signed_url')
+
+                # Find matching artifact file
+                matching_file = None
+                if file_type == 'source':
+                    matching_file = next((f for f in artifact_files if f.endswith('.tar.gz')), None)
+                elif file_type == 'wheel':
+                    matching_file = next((f for f in artifact_files if f.endswith('.whl')), None)
+
+                if matching_file:
+                    file_path = dist_dir / matching_file
+                    if self.verbose:
+                        logger.info(f'Uploading {matching_file}...')
+                    self.registry.upload_file(file_path, signed_url)
+                else:
+                    logger.warning(f'No matching file found for type: {file_type}')
+
+        except MurError as e:
             e.handle()
 
     def execute(self) -> None:
         """Execute the publish command.
 
-        This method orchestrates the entire publishing process including:
+        This method orchestrates the publishing process including:
         1. Determining the appropriate registry
-        2. Building the package
+        2. Finding the previously built package files
         3. Publishing the files
 
         Raises:
@@ -109,11 +108,32 @@ class PublishCommand(ArtifactCommand):
             else:
                 self.registry = PublicRegistryAdapter(verbose=self.verbose)
 
-            dist_dir, package_files = self._build_package()
-            self._publish_files(self.config, dist_dir, package_files)
+            # Look for dist directory in current directory first, then in artifact directory
+            dist_dir = self.current_dir / 'dist'
+            normalized_artifact_name = normalize_package_name(self.current_dir.name)
+            if not dist_dir.exists() or (not any(dist_dir.glob('*.whl')) and not any(dist_dir.glob('*.tar.gz'))):
+                # Try artifact directory
+                artifact_dir = self.current_dir / normalized_artifact_name / 'dist'
+                if not artifact_dir.exists():
+                    raise MurError(
+                        code=201,
+                        message='No dist directory found',
+                        detail='Please run "mur build" first to build the artifact.'
+                    )
+                dist_dir = artifact_dir
+
+            artifact_files = [f.name for f in dist_dir.glob('*') if f.name.endswith(('.whl', '.tar.gz'))]
+            if not artifact_files:
+                raise MurError(
+                    code=211,
+                    message='No artifact files found in dist directory',
+                    detail='Please run "mur build" first to build the artifact.'
+                )
+
+            self._publish_files(self.manifest, dist_dir, artifact_files)
 
             self.log_success(
-                f'Successfully published {self.artifact_type} ' f'{self.config.name} {self.config.version}'
+                f'Successfully published {self.artifact_type} ' f'{normalized_artifact_name}=={self.manifest.version}'
             )
 
         except Exception as e:

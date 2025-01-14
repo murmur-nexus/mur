@@ -7,9 +7,10 @@ from typing import Any
 import requests
 from requests.exceptions import RequestException
 
-from ..core.auth import AuthenticationError, AuthenticationManager
+from ..core.auth import AuthenticationManager
+from ..core.packaging import ArtifactManifest
 from ..utils.constants import DEFAULT_MURMUR_INDEX_URL, MURMUR_SERVER_URL, MURMURRC_PATH
-from ..utils.error_handler import CodeError
+from ..utils.error_handler import MurError
 from .base_adapter import RegistryAdapter
 
 logger = logging.getLogger(__name__)
@@ -30,64 +31,28 @@ class PublicRegistryAdapter(RegistryAdapter):
         self.base_url = MURMUR_SERVER_URL.rstrip('/')
         self.auth_manager = AuthenticationManager.create(verbose=verbose, base_url=self.base_url)
 
-    def get_headers(self) -> dict[str, str]:
-        """Get authentication headers for API requests.
-
-        Returns:
-            dict[str, str]: Headers dictionary containing Bearer token.
-
-        Raises:
-            CodeError: If authentication fails.
-        """
-        try:
-            access_token = self.auth_manager.authenticate()
-            return {'Authorization': f'Bearer {access_token}'}
-        except AuthenticationError as e:
-            raise CodeError(501, f'Authentication failed: {e}')
-
     def publish_artifact(
         self,
-        artifact_type: str,
-        name: str,
-        version: str,
-        description: str,
-        metadata: dict[str, Any],
-        file_path: Path | str,
+        manifest: ArtifactManifest,
     ) -> dict[str, Any]:
         """Publish an artifact to the registry.
 
         Args:
-            artifact_type (str): Type of the artifact.
-            name (str): Name of the artifact.
-            version (str): Version of the artifact.
-            description (str): Description of the artifact.
-            metadata (dict[str, Any]): Additional metadata for the artifact.
-            file_path (Path | str): Path to the artifact file.
+            manifest (ArtifactManifest): The artifact manifest containing metadata and file info
 
         Returns:
             dict[str, Any]: Server response containing artifact details.
 
         Raises:
-            CodeError: If file not found, connection fails, or server returns an error.
+            MurError: If connection fails or server returns an error.
         """
-        url = f'{self.base_url}/artifacts/'
-        file_path = Path(file_path)
+        url = f'{self.base_url}/artifacts'
 
-        if not file_path.exists():
-            raise CodeError(201, f'Artifact file not found: {file_path}')
-
-        data = {
-            'name': name,
-            'type': artifact_type,
-            'version': version,
-            'description': description,
-            'metadata': json.dumps(metadata),
-        }
+        logger.debug(f'Publishing artifact: {manifest.to_dict()}')
 
         try:
-            headers = self.get_headers()
-            with open(file_path, 'rb') as f:
-                response = requests.post(url, headers=headers, data=data, files={'file': f}, timeout=60)
+            headers = self._get_headers()
+            response = requests.post(url, headers=headers, json=manifest.to_dict(), timeout=60)
 
             if not response.ok:
                 self._handle_error_response(response)
@@ -96,10 +61,68 @@ class PublicRegistryAdapter(RegistryAdapter):
 
         except RequestException as e:
             if 'Connection refused' in str(e):
-                raise CodeError(
-                    804, f'Failed to connect to server: Connection refused. Is the server running at {self.base_url}?'
+                raise MurError(
+                    code=804,
+                    message='Failed to connect to server',
+                    detail=f'Connection refused. Is the server running at {self.base_url}?',
+                    original_error=e,
                 )
-            raise CodeError(200, str(e))
+            elif 'Failed to resolve' in str(e) or 'nodename nor servname provided' in str(e):
+                raise MurError(
+                    code=804,
+                    message='Failed to resolve server hostname',
+                    detail=f'{self.base_url}. Please check your network connection and DNS settings.',
+                    original_error=e,
+                )
+            raise MurError(803, f'Connection error: {e!s}')
+
+    def upload_file(self, file_path: Path, signed_url: str) -> None:
+        """Upload a file to the registry using a signed URL.
+
+        Args:
+            file_path (Path): The path to the file to upload.
+            signed_url (str): The signed URL to use for uploading the file.
+
+        Raises:
+            MurError: If the file upload fails or the file doesn't exist.
+        """
+        if not file_path.exists():
+            raise MurError(201, f'File not found: {file_path}')
+
+        try:
+            from tqdm import tqdm
+
+            file_size = file_path.stat().st_size
+
+            with open(file_path, 'rb') as f:
+                with tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Uploading {file_path.name}') as pbar:
+                    data = f.read()
+                    pbar.update(file_size)
+
+                    response = requests.put(
+                        signed_url, data=data, headers={'Content-Type': 'application/octet-stream'}, timeout=300
+                    )
+
+            if not response.ok:
+                raise MurError(800, f'Failed to upload file: {response.text}')
+
+        except RequestException as e:
+            raise MurError(200, f'Upload failed: {e!s}')
+
+    def _get_headers(self) -> dict[str, str]:
+        """Get authentication headers for API requests.
+
+        Returns:
+            dict[str, str]: Headers dictionary containing Bearer token.
+
+        Raises:
+            MurError: If authentication fails.
+        """
+        try:
+            access_token = self.auth_manager.authenticate()
+            return {'Authorization': f'Bearer {access_token}'}
+        except MurError:
+            raise
 
     def _handle_error_response(self, response: requests.Response) -> None:
         """Handle error responses from the server.
@@ -108,28 +131,46 @@ class PublicRegistryAdapter(RegistryAdapter):
             response (requests.Response): Response object from the server.
 
         Raises:
-            CodeError: With appropriate error code and message based on the response.
+            MurError: With appropriate error code and message based on the response.
         """
+        # Parse error response
         try:
             error_data = response.json()
+            detail = error_data.get('detail', '')
         except json.JSONDecodeError:
-            error_data = {}
+            detail = response.text
 
-        detail = error_data.get('detail', '')
+        # Handle specific error messages
+        if 'Token has expired' in detail:
+            raise MurError(
+                code=504, 
+                message='Token has expired. Please log in again', 
+                detail='Please run `mur logout` and try again.'
+            )
+        if 'Could not validate credentials' in detail:
+            raise MurError(502, 'Could not validate credentials')
+        if 'The package or file already exists in the feed' in detail:
+            raise MurError(302, 'Package with version already exists')
 
-        if response.status_code == 400 and detail == 'Conflict error: The package or file already exists in the feed.':
-            raise CodeError(302, 'Package with version already exists')
-
-        error_mapping = {
-            800: (300, detail if detail else 'Bad request'),
-            804: (502 if detail == 'Could not validate credentials' else 300, detail if detail else 'Unauthorized'),
-            807: (502, 'Permission denied'),
-            502: (801, 'Resource not found'),
+        # Map standard HTTP status codes
+        STATUS_CODE_MAPPING = {
+            400: (600, 'Bad request'),
+            401: (502, 'Unauthorized'),
+            403: (505, 'Permission denied'),
+            404: (600, 'Resource not found'),
+            500: (600, 'Server error'),
+            502: (806, 'Bad gateway'),
+            503: (804, 'Service unavailable'),
         }
 
-        error_code, error_message = error_mapping.get(response.status_code, (800, 'Server error'))
+        # Get error code and message, with fallback to generic server error
+        error_code, error_message = STATUS_CODE_MAPPING.get(response.status_code, (800, 'Server error'))
 
-        raise CodeError(error_code, error_message)
+        # Use provided detail if available
+        if detail:
+            error_message = detail
+
+        raise MurError(error_code, error_message)
 
     def get_package_indexes(self) -> list[str]:
         """Get package indexes from .murmurrc configuration.
