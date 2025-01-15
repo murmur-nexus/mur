@@ -5,6 +5,8 @@ from pathlib import Path
 
 import click
 
+from mur.utils.error_handler import MessageType, MurError
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,11 +42,7 @@ class UninstallArtifactCommand:
             return
 
         if result.returncode != 0:
-            raise MurError(
-                code=309,
-                message=f"Failed to uninstall {package_name}",
-                original_error=result.stderr
-            )
+            raise MurError(code=309, message=f'Failed to uninstall {package_name}', original_error=result.stderr)
 
         if self.verbose:
             logger.info(f'Successfully uninstalled {package_name}')
@@ -58,16 +56,11 @@ class UninstallArtifactCommand:
         """
         try:
             import importlib.util
-            import murmur
 
             # Get the path to the namespace package
             spec = importlib.util.find_spec('murmur')
             if spec is None or not spec.submodule_search_locations:
-                raise MurError(
-                    code=211,
-                    message="Could not locate murmur namespace",
-                    type=MessageType.WARNING
-                )
+                raise MurError(code=211, message='Could not locate murmur namespace', type=MessageType.WARNING)
 
             # Find first valid init file in namespace locations
             init_path = None
@@ -82,8 +75,8 @@ class UninstallArtifactCommand:
             if not init_path:
                 raise MurError(
                     code=201,
-                    message=f"Could not find {artifact_type} __init__.py in murmur namespace locations",
-                    type=MessageType.WARNING
+                    message=f'Could not find {artifact_type} __init__.py in murmur namespace locations',
+                    type=MessageType.WARNING,
                 )
 
             if self.verbose:
@@ -102,10 +95,7 @@ class UninstallArtifactCommand:
 
         except Exception as e:
             raise MurError(
-                code=200,
-                message="Failed to clean up init files",
-                type=MessageType.WARNING,
-                original_error=e
+                code=200, message='Failed to clean up init files', type=MessageType.WARNING, original_error=e
             )
 
     def execute(self) -> None:
@@ -120,11 +110,7 @@ class UninstallArtifactCommand:
             self._remove_from_init_file(self.name, 'tools')
             click.echo(click.style(f'Successfully uninstalled {self.name}', fg='green'))
         except Exception as e:
-            raise MurError(
-                code=309,
-                message=f"Failed to uninstall {self.name}",
-                original_error=e
-            )
+            raise MurError(code=309, message=f'Failed to uninstall {self.name}', original_error=e)
 
 
 def uninstall_command() -> click.Command:
