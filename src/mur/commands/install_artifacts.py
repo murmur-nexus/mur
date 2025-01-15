@@ -6,8 +6,12 @@ import sysconfig
 from pathlib import Path
 
 import click
+import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError, RequestException, Timeout
 
 from ..utils.constants import MURMUR_EXTRAS_INDEX_URL, MURMUR_INDEX_URL, MURMURRC_PATH
+from ..utils.error_handler import MurError
+from ..utils.loading import Spinner
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
@@ -17,7 +21,7 @@ class InstallArtifactCommand(ArtifactCommand):
     """Handles artifact installation.
 
     This class manages the installation of Murmur artifacts (agents and tools) from
-    a murmur.yaml configuration file.
+    a murmur.yaml manifest file.
     """
 
     def __init__(self, verbose: bool = False) -> None:
@@ -41,71 +45,175 @@ class InstallArtifactCommand(ArtifactCommand):
         site_packages.mkdir(parents=True, exist_ok=True)
         return site_packages
 
-    def _install_package(self, package_name: str, version: str, artifact_type: str) -> None:
-        """Install a package using pip with configured index URLs.
-
-        Args:
-            package_name (str): Name of the package to install
-            version (str): Version of the package to install ('latest' or specific version)
-            artifact_type (str): Type of artifact ('agents' or 'tools')
-
-        Raises:
-            click.ClickException: If package installation fails
-        """
+    def _install_artifact(self, package_name: str, version: str, artifact_type: str) -> None:
+        """Install a package using pip with configured index URLs."""
         try:
-            # Handle versions including 'latest' or empty
-            # TODO: Add support for private namespace since it can conflict with public packages
             package_spec = package_name if version.lower() in ['latest', ''] else f'{package_name}=={version}'
-
-            # Get index URLs from .murmurrc
             index_url, extra_index_urls = self._get_index_urls_from_murmurrc(MURMURRC_PATH)
 
-            # Override index_url if it matches MURMUR_INDEX_URL
             if index_url == MURMUR_INDEX_URL:
-                # Use private registry URL
                 index_url = MURMUR_INDEX_URL
 
-            # Override extra_index_urls if MURMUR_EXTRAS_INDEX_URL is set
             if MURMUR_EXTRAS_INDEX_URL:
-                extra_index_urls = [
-                    url.strip() for url in MURMUR_EXTRAS_INDEX_URL.split(',')
-                ]  # Override index_url if it matches MURMUR_INDEX_URL
+                extra_index_urls = [url.strip() for url in MURMUR_EXTRAS_INDEX_URL.split(',')]
 
-            command = [
-                sys.executable,
-                '-m',
-                'pip',
-                'install',
-                '--disable-pip-version-check',
-                package_spec,
-                '--index-url',
-                index_url,
-            ]
+            with Spinner() as spinner:
+                if not self.verbose:
+                    spinner.start(f'Installing {package_spec}')
 
-            # Add extra index URLs if any
-            for url in extra_index_urls:
+                self._handle_package_installation(package_spec, package_name, index_url, extra_index_urls)
+
+        except MurError:
+            raise
+        except Exception as e:
+            raise MurError(
+                code=300,
+                message=f'Failed to install {package_name}',
+                detail='An unexpected error occurred during package installation.',
+                original_error=e,
+            )
+
+    def _handle_package_installation(
+        self, package_spec: str, package_name: str, index_url: str, extra_index_urls: list[str]
+    ) -> None:
+        """Handle the package installation process."""
+        if '.murmur.nexus' in index_url:
+            self._install_nexus_package(package_spec, package_name, index_url, extra_index_urls)
+        else:
+            self._private_package_command(package_spec, index_url)
+
+    def _install_nexus_package(
+        self, package_spec: str, package_name: str, index_url: str, extra_index_urls: list[str]
+    ) -> None:
+        """Install a package from Murmur Nexus repository."""
+        try:
+            self._main_package_command(package_spec, index_url)
+        except subprocess.CalledProcessError as e:
+            if 'Connection refused' in str(e) or 'Could not find a version' in str(e):
+                raise MurError(
+                    code=806,
+                    message=f'Failed to connect to package registry for {package_name}',
+                    detail='Could not establish connection to the package registry. Please check your network connection and registry URL.',
+                    original_error=e,
+                )
+            raise MurError(
+                code=307,
+                message=f'Failed to install {package_name}',
+                detail='The package installation process failed.',
+                original_error=e,
+            )
+
+        self._process_package_metadata(package_name, index_url, extra_index_urls)
+
+    def _process_package_metadata(self, package_name: str, index_url: str, extra_index_urls: list[str]) -> None:
+        """Process package metadata and install dependencies."""
+        try:
+            logger.debug(f'Checking metadata for {package_name} from {index_url}')
+            logger.debug(f'{index_url}/{package_name}/metadata')
+            response = requests.get(f'{index_url}/{package_name}/metadata/', timeout=30)
+            response.raise_for_status()
+            package_info = response.json()
+
+            logger.debug(f'Package info: {package_info}')
+
+            if dependencies := package_info.get('requires_dist'):
+                logger.debug(f'Dependencies: {dependencies}')
+                for dep_spec in dependencies:
+                    self._dependencies_package_command(dep_spec, index_url, extra_index_urls)
+
+        except RequestsConnectionError as e:
+            raise MurError(
+                code=806,
+                message=f'Failed to connect to package registry for {package_name}',
+                detail='Could not establish connection to the package registry. Please check your network connection and registry URL.',
+                original_error=e,
+            )
+        except Timeout as e:
+            raise MurError(
+                code=804,
+                message=f'Connection timed out while fetching metadata for {package_name}',
+                detail='The request to the package registry timed out. Please try again or check your network connection.',
+                original_error=e,
+            )
+        except RequestException as e:
+            raise MurError(
+                code=803,
+                message=f'Failed to fetch metadata for {package_name}',
+                detail='Encountered an error while communicating with the package registry.',
+                original_error=e,
+            )
+
+    def _main_package_command(self, package_spec: str, index_url: str) -> None:
+        command = [
+            sys.executable,
+            '-m',
+            'pip',
+            'install',
+            '--no-deps',
+            '--disable-pip-version-check',
+            package_spec,
+            '--index-url',
+            index_url,
+        ]
+
+        if not self.verbose:
+            command.append('--quiet')
+
+        subprocess.check_call(command)  # nosec B603
+
+    def _dependencies_package_command(self, package_spec: str, index_url: str, extra_index_urls: list[str]) -> None:
+        command = [
+            sys.executable,
+            '-m',
+            'pip',
+            'install',
+            '--disable-pip-version-check',
+            package_spec,
+            '--index-url',
+            extra_index_urls[0],
+            '--extra-index-url',
+            index_url,
+        ]
+
+        if not self.verbose:
+            command.append('--quiet')
+
+        # Add additional extra index URLs only if exist
+        if len(extra_index_urls[1:]) > 1:
+            for url in extra_index_urls[1:]:
                 command.extend(['--extra-index-url', url])
 
-            if self.verbose:
-                logger.info(f'Installing {package_spec}...')
+        subprocess.check_call(command)  # nosec B603
 
-            subprocess.check_call(command)  # nosec B603
+    def _private_package_command(self, package_spec: str, index_url: str) -> None:
+        command = [
+            sys.executable,
+            '-m',
+            'pip',
+            'install',
+            '--disable-pip-version-check',
+            package_spec,
+            '--index-url',
+            index_url,
+        ]
 
-            if self.verbose:
-                logger.info(f'Successfully installed {package_spec}')
+        if not self.verbose:
+            command.append('--quiet')
 
-        except Exception as e:
-            raise click.ClickException(f'Failed to install {package_name}: {e}')
+        subprocess.check_call(command)  # nosec B603
 
-    def _check_murmur_installed(self) -> None:
+    def _murmur_must_be_installed(self) -> None:
         """Check if the main murmur package is installed.
 
         Raises:
-            click.ClickException: If murmur package is not installed
+            MurError: If murmur package is not installed
         """
         if importlib.util.find_spec('murmur') is None:
-            raise click.ClickException(
-                'The murmur package is not installed. Please install it before installing your agent or tool.'
+            raise MurError(
+                code=308,
+                message='Murmur package is not installed',
+                detail='Please install the murmur package before installing your agent or tool',
+                debug_messages=["importlib.util.find_spec('murmur') returned None"],
             )
 
     def _update_init_file(self, package_name: str, artifact_type: str) -> None:
@@ -143,11 +251,11 @@ class InstallArtifactCommand(ArtifactCommand):
         their associated tools.
 
         Args:
-            artifacts (list[dict]): List of artifacts to install from yaml config
+            artifacts (list[dict]): List of artifacts to install from yaml manifest
             artifact_type (str): Type of artifact ('agents' or 'tools')
         """
         for artifact in artifacts:
-            self._install_package(artifact['name'], artifact['version'], artifact_type)
+            self._install_artifact(artifact['name'], artifact['version'], artifact_type)
             # Update __init__.py file
             self._update_init_file(artifact['name'], artifact_type)
 
@@ -158,24 +266,21 @@ class InstallArtifactCommand(ArtifactCommand):
     def execute(self) -> None:
         """Execute the install command.
 
-        Reads the murmur.yaml configuration file from the current directory and
+        Reads the murmur.yaml manifest file from the current directory and
         installs all specified agents and tools.
-
-        Raises:
-            click.ClickException: If installation fails
         """
         try:
             # Check for murmur package first
-            self._check_murmur_installed()
+            self._murmur_must_be_installed()
 
-            config = self._load_murmur_yaml_from_current_dir()
+            manifest = self._load_murmur_yaml_from_current_dir()
 
             # Install agents and their tools if any
-            if agents := config.get('agents', []):
+            if agents := manifest.get('agents', []):
                 self._install_artifact_group(agents, 'agents')
 
             # Install root-level tools if any
-            if tools := config.get('tools', []):
+            if tools := manifest.get('tools', []):
                 self._install_artifact_group(tools, 'tools')
 
             self.log_success('Successfully installed all artifacts')
@@ -188,7 +293,7 @@ def install_command() -> click.Command:
     """Create the install command for Click.
 
     Creates a Click command that handles the installation of Murmur artifacts
-    from a murmur.yaml configuration file.
+    from a murmur.yaml manifest file.
 
     Returns:
         click.Command: Click command for installing artifacts

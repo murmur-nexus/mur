@@ -8,7 +8,8 @@ from .commands.install_artifacts import install_command
 from .commands.new_artifact import new_command
 from .commands.publish_artifact import publish_command
 from .commands.uninstall_artifacts import uninstall_command
-from .core.auth import AuthenticationError, AuthenticationManager
+from .core.auth import AuthenticationManager
+from .utils.error_handler import MurError
 
 # Configure logging
 logging.basicConfig(
@@ -40,8 +41,14 @@ class MurCLI(click.Group):
         """
         try:
             return self.main(*args, **kwargs)
+        except MurError as e:
+            e.log()  # handles all the logging
+            raise click.Abort()
         except Exception as e:
+            # Unexpected errors
             logger.error(str(e))
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug('Unexpected error:', exc_info=e)
             raise click.Abort()
 
 
@@ -71,9 +78,8 @@ def logout(verbose: bool) -> None:
         auth_manager = AuthenticationManager.create(verbose)
         auth_manager.clear_credentials()
         click.echo('Logged out successfully')
-    except AuthenticationError as e:
-        logger.error(f'Failed to clear credentials: {e}')
-        raise click.Abort()
+    except MurError as e:
+        e.handle()
 
 
 # Add commands directly

@@ -6,6 +6,8 @@ from typing import Any
 from twine.commands.upload import upload
 from twine.settings import Settings
 
+from mur.core.packaging import ArtifactManifest
+
 from ..utils.constants import (
     MURMUR_EXTRAS_INDEX_URL,
     MURMUR_INDEX_URL,
@@ -13,7 +15,7 @@ from ..utils.constants import (
     PYPI_PASSWORD,
     PYPI_USERNAME,
 )
-from ..utils.error_handler import CodeError
+from ..utils.error_handler import MurError
 from .base_adapter import RegistryAdapter
 
 logger = logging.getLogger(__name__)
@@ -35,39 +37,55 @@ class PrivateRegistryAdapter(RegistryAdapter):
 
     def publish_artifact(
         self,
-        artifact_type: str,
-        name: str,
-        version: str,
-        description: str,
-        metadata: dict[str, Any],
-        file_path: Path | str,
+        manifest: ArtifactManifest,
     ) -> dict[str, Any]:
         """Publish an artifact to the private PyPI registry.
 
         Args:
-            artifact_type (str): Type of the artifact being published.
-            name (str): Name of the artifact.
-            version (str): Version of the artifact.
-            description (str): Description of the artifact.
-            metadata (dict[str, Any]): Additional metadata for the artifact.
-            file_path (Path | str): Path to the artifact file to publish.
+            manifest (ArtifactManifest): The artifact manifest containing metadata and file info
 
         Returns:
             dict[str, Any]: Response containing status and message about the publish operation.
 
         Raises:
-            CodeError: If artifact file is not found (201) or if publishing fails (200).
+            MurError: If artifact file is not found (201) or if publishing fails (200).
         """
         try:
-            file_path = Path(file_path)
-            if not file_path.exists():
-                raise CodeError(201, f'Artifact file not found: {file_path}')
+            logger.debug(f'Publishing artifact: {manifest.to_dict()}')
 
-            # Remove /simple from the URL if present
             repository_url = self.base_url.rstrip('/').replace('/simple', '')
+            response = {
+                'status': 'pending',
+                'message': 'Ready for file upload',
+                'signed_upload_urls': [
+                    {'file_type': 'wheel', 'signed_url': repository_url},
+                    {'file_type': 'source', 'signed_url': repository_url},
+                ],
+            }
 
+            return response
+
+        except Exception as e:
+            if isinstance(e, MurError):
+                raise
+            raise MurError(200, f'Failed to publish to private registry: {e!s}') from e
+
+    def upload_file(self, file_path: Path, signed_url: str) -> None:
+        """Upload a file to the registry using a URL.
+
+        Args:
+            file_path (Path): The path to the file to upload.
+            signed_url (str): The URL to use for uploading the file.
+
+        Raises:
+            MurError: If the file upload fails or the file doesn't exist.
+        """
+        if not file_path.exists():
+            raise MurError(201, f'File not found: {file_path}')
+
+        try:
             settings = Settings(
-                repository_url=repository_url,
+                repository_url=signed_url,
                 sign=False,
                 verbose=self.verbose,
                 repository_name='private',  # Required to identify the repository
@@ -78,14 +96,12 @@ class PrivateRegistryAdapter(RegistryAdapter):
             )
 
             if self.verbose:
-                logger.info(f'Publishing {file_path} to private PyPI at {repository_url}')
+                logger.info(f'Uploading {file_path} to private PyPI at {signed_url}')
 
             upload(upload_settings=settings, dists=[str(file_path)])
 
-            return {'status': 'success', 'message': f'Published {file_path.name} to {repository_url}'}
-
         except Exception as e:
-            raise CodeError(200, f'Failed to publish to private registry: {e!s}') from e
+            raise MurError(200, f'Upload failed: {e!s}')
 
     def get_package_indexes(self) -> list[str]:
         """Get package indexes, prioritizing environment variables over .murmurrc config.
@@ -97,7 +113,7 @@ class PrivateRegistryAdapter(RegistryAdapter):
             list[str]: List of package index URLs with primary index first.
 
         Raises:
-            CodeError: If no private registry URL is configured (807) or if reading configuration fails.
+            MurError: If no private registry URL is configured (807) or if reading configuration fails.
         """
         # Get URLs from environment variables
         index_url = MURMUR_INDEX_URL
@@ -117,10 +133,10 @@ class PrivateRegistryAdapter(RegistryAdapter):
 
                 # If still no index URL, raise error
                 if not index_url:
-                    raise CodeError(
-                        807,
-                        'No private registry URL configured. Set MURMUR_INDEX_URL environment variable '
-                        "or 'index-url' in .murmurrc [global] section.",
+                    raise MurError(
+                        code=807,
+                        message='No private registry URL configured',
+                        detail="Set MURMUR_INDEX_URL environment variable or 'index-url' in .murmurrc [global] section.",
                     )
 
                 # Get extra indexes from config if no env var extras
@@ -129,13 +145,13 @@ class PrivateRegistryAdapter(RegistryAdapter):
                     extra_indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
 
             except Exception as e:
-                if isinstance(e, CodeError):
+                if isinstance(e, MurError):
                     raise
                 logger.warning(f'Failed to read .murmurrc config: {e}')
-                raise CodeError(
-                    807,
-                    'Failed to get private registry configuration. Ensure either MURMUR_INDEX_URL '
-                    'environment variable is set or .murmurrc is properly configured.',
+                raise MurError(
+                    code=807,
+                    message='Failed to get private registry configuration',
+                    detail='Ensure either MURMUR_INDEX_URL environment variable is set or .murmurrc is properly configured.',
                 )
 
         indexes = [index_url]
