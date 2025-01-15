@@ -47,7 +47,9 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
 
       - name: Run Ruff Linting
-        run: hatch -e dev run lint
+        run: |
+          hatch -e dev run format
+          hatch -e dev run lint
         working-directory: ${{ inputs.working-directory }}
 
       - name: Run MyPy Type Checking
