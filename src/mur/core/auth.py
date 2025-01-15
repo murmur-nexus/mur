@@ -4,21 +4,11 @@ import click
 import requests
 
 from ..utils.constants import DEFAULT_TIMEOUT, MURMUR_SERVER_URL
-from .cache import CacheError, CredentialCache
+from ..utils.error_handler import MurError
+from .cache import CredentialCache
 from .config import ConfigManager
 
 logger = logging.getLogger(__name__)
-
-
-class AuthenticationError(Exception):
-    """Raised when authentication operations fail.
-
-    This exception is used throughout the authentication module to indicate
-    failures in authentication-related operations such as login attempts,
-    credential management, and token validation.
-    """
-
-    pass
 
 
 class AuthenticationManager:
@@ -44,7 +34,7 @@ class AuthenticationManager:
             verbose: Whether to enable verbose output
 
         Raises:
-            AuthenticationError: If initialization fails
+            MurError: If initialization fails
         """
         try:
             self.verbose = verbose
@@ -56,8 +46,10 @@ class AuthenticationManager:
             if verbose:
                 logger.setLevel(logging.DEBUG)
 
-        except (Exception, CacheError) as e:
-            raise AuthenticationError(f'Failed to initialize authentication: {e}')
+        except MurError:
+            raise
+        except Exception as e:
+            raise MurError(code=501, message='Failed to initialize authentication', original_error=e)
 
     def authenticate(self) -> str:
         """Get a valid access token, using cached credentials when possible.
@@ -71,7 +63,7 @@ class AuthenticationManager:
             str: Valid access token for API authentication
 
         Raises:
-            AuthenticationError: If authentication fails at any step
+            MurError: If authentication fails at any step
         """
         try:
             # Try cached access token
@@ -90,8 +82,15 @@ class AuthenticationManager:
             # Need to prompt for credentials
             return self._prompt_and_authenticate()
 
-        except (CacheError, Exception) as e:
-            raise AuthenticationError(f'Authentication failed: {e}')
+        except MurError:
+            raise
+        except Exception as e:
+            raise MurError(
+                code=501,
+                message='Authentication failed',
+                detail='Failed to authenticate with provided credentials',
+                original_error=e,
+            )
 
     def _validate_token(self, token: str) -> bool:
         """Validate if the token is still valid.
@@ -124,7 +123,7 @@ class AuthenticationManager:
             On successful authentication, credentials are automatically cached.
         """
         try:
-            url = f'{self.base_url}/login'
+            url = f'{self.base_url}/auth/login'
             payload = {'grant_type': 'password', 'username': username, 'password': password}
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
@@ -141,8 +140,12 @@ class AuthenticationManager:
             return None
 
         except Exception as e:
-            logger.debug(f'Authentication failed: {e}')
-            return None
+            raise MurError(
+                code=501,
+                message='Authentication failed',
+                detail='Failed to authenticate with provided credentials',
+                original_error=e,
+            )
 
     def _save_credentials(self, username: str, password: str, access_token: str) -> None:
         """Save credentials for future use.
@@ -153,7 +156,7 @@ class AuthenticationManager:
             access_token: Access token to save
 
         Raises:
-            AuthenticationError: If credentials cannot be saved
+            MurError: If credentials cannot be saved
         """
         try:
             self.cache.save_access_token(access_token)
@@ -161,8 +164,10 @@ class AuthenticationManager:
             self.config_manager.save_config()
             self.cache.save_password(password)
             logger.debug('Saved credentials')
-        except (CacheError, Exception) as e:
-            raise AuthenticationError(f'Failed to save credentials: {e}')
+        except MurError:
+            raise
+        except Exception as e:
+            raise MurError(code=501, message='Failed to save credentials', original_error=e)
 
     def _prompt_and_authenticate(self) -> str:
         """Prompt for credentials and authenticate.
@@ -174,28 +179,38 @@ class AuthenticationManager:
             str: Valid access token
 
         Raises:
-            AuthenticationError: If authentication fails
+            MurError: If authentication fails
             click.Abort: If user cancels authentication
         """
         click.echo('Authentication required')
 
         try:
-            username = str(self.config.get('username'))
-            if not username:
+            # Get and validate username
+            cached_username = self.config.get('username')
+            if not cached_username:
                 username = click.prompt('Username', type=str)
+            else:
+                # Ensure username is str type
+                username = str(cached_username)
+                logger.debug(f'Using cached username: {username}')
 
             password = click.prompt('Password', type=str, hide_input=True)
 
+            # At this point username is guaranteed to be a str
             if access_token := self._authenticate(username, password):
                 return access_token
 
-            raise AuthenticationError('Invalid credentials')
+            raise MurError(
+                code=503, message='Invalid credentials', detail='Please check your username and password and try again'
+            )
 
         except click.Abort:
             logger.debug('User cancelled authentication')
             raise
+        except MurError:
+            raise
         except Exception as e:
-            raise AuthenticationError(f'Authentication failed: {e}')
+            raise MurError(code=501, message='Authentication failed', original_error=e)
 
     def clear_credentials(self) -> None:
         """Clear all stored credentials.
@@ -206,7 +221,7 @@ class AuthenticationManager:
         - Username from configuration
 
         Raises:
-            AuthenticationError: If credentials cannot be cleared
+            MurError: If credentials cannot be cleared
         """
         try:
             self.cache.clear_access_token()
@@ -215,8 +230,10 @@ class AuthenticationManager:
                 del self.config['username']
                 self.config_manager.save_config()
             logger.debug('Cleared all credentials')
-        except (CacheError, Exception) as e:
-            raise AuthenticationError(f'Failed to clear credentials: {e}')
+        except MurError:
+            raise
+        except Exception as e:
+            raise MurError(code=501, message='Failed to clear credentials', original_error=e)
 
     @classmethod
     def create(cls, verbose: bool = False, base_url: str = MURMUR_SERVER_URL) -> 'AuthenticationManager':
@@ -233,10 +250,10 @@ class AuthenticationManager:
             AuthenticationManager: Configured instance
 
         Raises:
-            AuthenticationError: If manager creation fails
+            MurError: If manager creation fails
         """
         try:
             config_manager = ConfigManager()
             return cls(config_manager, base_url, verbose)
         except Exception as e:
-            raise AuthenticationError(f'Failed to create authentication manager: {e}')
+            raise MurError(code=501, message='Failed to create authentication manager', original_error=e)

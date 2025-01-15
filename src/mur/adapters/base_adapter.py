@@ -1,7 +1,8 @@
 import logging
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
+
+from ..core.packaging import ArtifactManifest
 
 logger = logging.getLogger(__name__)
 
@@ -24,22 +25,12 @@ class RegistryAdapter(ABC):
     @abstractmethod
     def publish_artifact(
         self,
-        artifact_type: str,
-        name: str,
-        version: str,
-        description: str,
-        metadata: dict[str, Any],
-        file_path: Path | str,
+        manifest: ArtifactManifest,
     ) -> dict[str, Any]:
         """Publish an artifact to the registry.
 
         Args:
-            artifact_type (str): Type of artifact being published
-            name (str): Name of the artifact
-            version (str): Version string of the artifact
-            description (str): Description of the artifact
-            metadata (dict[str, Any]): Additional metadata for the artifact
-            file_path (Path | str): Path to the artifact file to publish
+            manifest (ArtifactManifest): The artifact manifest containing metadata and file info
 
         Returns:
             dict[str, Any]: Response data from the registry after publishing

@@ -5,6 +5,9 @@ from pathlib import Path
 import click
 from ruamel.yaml import YAML
 
+from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_package_name
+from ..utils.error_handler import MurError
+from ..utils.loading import Spinner
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
@@ -23,6 +26,8 @@ class BuildCommand(ArtifactCommand):
         build_manifest (dict): The loaded build manifest configuration.
         artifact_type (str): Type of artifact ('agent' or 'tool').
         config (dict): The build configuration (alias for build_manifest).
+        dist_dir (Path): Directory containing the built files.
+        package_files (list[str]): List of built package filenames.
     """
 
     def __init__(self, verbose: bool = False) -> None:
@@ -30,7 +35,34 @@ class BuildCommand(ArtifactCommand):
 
         Args:
             verbose: Whether to enable verbose output
+
+        Raises:
+            MurError: If manifest validation fails
         """
+        try:
+            super().__init__('build', verbose)
+
+            # Load and validate manifest
+            try:
+                self.build_manifest = self._load_murmur_yaml_from_artifact()
+                self.artifact_type = self.build_manifest.type
+                self.build_manifest = self.build_manifest._metadata
+            except MurError as e:
+                e.handle()
+
+            if self.artifact_type not in ['agent', 'tool']:
+                raise MurError(
+                    code=207,
+                    message=f"Invalid artifact type '{self.artifact_type}'",
+                    detail="The artifact type in murmur.yaml must be either 'agent' or 'tool'.",
+                    debug_messages=[f'Found artifact_type: {self.artifact_type}'],
+                )
+
+        except Exception as e:
+            if not isinstance(e, MurError):
+                raise MurError(code=207, message=str(e), original_error=e)
+            raise
+
         self.verbose = verbose
         self.current_dir = self.get_current_dir()
         self.yaml = self._configure_yaml()
@@ -39,12 +71,15 @@ class BuildCommand(ArtifactCommand):
         self.build_manifest = self._load_build_manifest()
         self.artifact_type = self.build_manifest.get('type')
         if self.artifact_type not in ['agent', 'tool']:
-            raise click.ClickException(
-                f"Invalid artifact type '{self.artifact_type}' in murmur-build.yaml. "
-                "Must be either 'agent' or 'tool'."
+            raise MurError(
+                code=207,
+                message=f"Invalid artifact type '{self.artifact_type}'",
+                detail="The artifact type in murmur-build.yaml must be either 'agent' or 'tool'.",
+                debug_messages=[f'Found artifact_type: {self.artifact_type}'],
             )
         super().__init__(self.artifact_type, verbose)
-        self.config = self.build_manifest
+        self.dist_dir = None
+        self.package_files = None
 
     def _configure_yaml(self) -> YAML:
         """Configure YAML parser settings.
@@ -71,17 +106,21 @@ class BuildCommand(ArtifactCommand):
             dict: Manifest configuration dictionary.
 
         Raises:
-            click.ClickException: If manifest file is missing or invalid YAML.
+            MurError: If manifest file is missing or invalid YAML.
         """
         manifest_file = self.current_dir / 'murmur-build.yaml'
         if not manifest_file.exists():
-            raise click.ClickException('murmur-build.yaml not found in current directory')
+            raise MurError(
+                code=201,
+                message='murmur-build.yaml not found',
+                detail='The murmur-build.yaml manifest file was not found in the current directory',
+            )
 
         try:
             with open(manifest_file) as f:
                 return self.yaml.load(f)
         except Exception as e:
-            raise click.ClickException(f'Failed to load murmur-build.yaml: {e}')
+            raise MurError(code=205, message='Failed to load murmur-build.yaml', original_error=e)
 
     def _create_directory_structure(self, artifact_path: Path) -> None:
         """Create the artifact directory structure.
@@ -95,7 +134,7 @@ class BuildCommand(ArtifactCommand):
             artifact_path (Path): Root path for new artifact.
 
         Raises:
-            click.ClickException: If directory creation fails, required files are missing,
+            MurError: If directory creation fails, required files are missing,
                 or source file copying fails.
         """
         try:
@@ -116,8 +155,10 @@ class BuildCommand(ArtifactCommand):
             if (self.current_dir / 'src').exists():
                 src_files = list((self.current_dir / 'src').glob('*.py'))
                 if src_files and not (self.current_dir / 'src' / 'main.py').exists():
-                    raise click.ClickException(
-                        'Source files found but main.py is missing. ' 'main.py is required as the default entry point.'
+                    raise MurError(
+                        code=201,
+                        message='main.py is missing',
+                        detail='Source files found but main.py is missing. main.py is required as the default entry point.',
                     )
                 elif (main_file := self.current_dir / 'src' / 'main.py').exists():
                     shutil.copy(main_file, package_path)
@@ -132,7 +173,7 @@ class BuildCommand(ArtifactCommand):
                 logger.debug(f'Created default main.py with {artifact_path.name} function')
 
         except Exception as e:
-            raise click.ClickException(f'Failed to create directory structure: {e}')
+            raise MurError(code=209, message='Failed to create directory structure', original_error=e)
 
     def _create_project_files(self, artifact_path: Path) -> None:
         """Create all necessary project files.
@@ -144,12 +185,12 @@ class BuildCommand(ArtifactCommand):
             artifact_path (Path): Root path for new artifact.
 
         Raises:
-            click.ClickException: If file creation fails.
+            MurError: If file creation fails.
         """
         try:
             # Create README.md
             with open(artifact_path / 'README.md', 'w') as f:
-                f.write(f"# {self.config['name']}\n\n{self.config.get('description', '')}")
+                f.write(f"# {self.build_manifest['name']}\n\n{self.build_manifest.get('description', '')}")
 
             # Create pyproject.toml
             with open(artifact_path / 'pyproject.toml', 'w') as f:
@@ -160,7 +201,7 @@ class BuildCommand(ArtifactCommand):
                 logger.info('Created project configuration files')
 
         except Exception as e:
-            raise click.ClickException(f'Failed to create project files: {e}')
+            raise MurError(code=210, message='Failed to create project files', original_error=e)
 
     def _generate_pyproject_toml(self) -> str:
         """Generate pyproject.toml content.
@@ -197,12 +238,16 @@ class BuildCommand(ArtifactCommand):
             list[str]: Lines for the project section of pyproject.toml, including
                 name, version, description, and other metadata.
         """
-        content = ['[project]', f'name = "{self.config["name"].lower()}"', f'version = "{self.config["version"]}"']
+        content = [
+            '[project]',
+            f'name = "{self.build_manifest["name"].lower()}"',
+            f'version = "{self.build_manifest["version"]}"',
+        ]
 
-        metadata = self.config.get('metadata', {})
+        metadata = self.build_manifest.get('metadata', {})
 
         # Add optional fields
-        if description := self.config.get('description'):
+        if description := self.build_manifest.get('description'):
             content.append(f'description = "{description}"')
 
         if requires_python := metadata.get('requires_python'):
@@ -282,9 +327,9 @@ class BuildCommand(ArtifactCommand):
         Returns:
             list[str]: Lines for the dependencies section of pyproject.toml.
         """
-        if dependencies := self.config.get('dependencies', []):
-            return ['dependencies = [', *[f'    "{dep}",' for dep in dependencies], ']']
-        return ['dependencies = []']
+        if dependencies := self.build_manifest.get('dependencies', []):
+            return ['requires_dist = [', *[f'    "{dep}",' for dep in dependencies], ']']
+        return ['requires_dist = []']
 
     def _generate_project_urls(self) -> list[str]:
         """Generate project.urls section.
@@ -293,7 +338,7 @@ class BuildCommand(ArtifactCommand):
             list[str]: Lines for the project.urls section of pyproject.toml.
         """
         valid_url_types = {'repository', 'documentation', 'project'}
-        urls = self.config.get('metadata', {}).get('urls', {})
+        urls = self.build_manifest.get('metadata', {}).get('urls', {})
         valid_urls = {
             url_type: url_list[0] for url_type, url_list in urls.items() if url_type in valid_url_types and url_list
         }
@@ -326,7 +371,7 @@ class BuildCommand(ArtifactCommand):
             artifact_path (Path): Path to new artifact.
 
         Raises:
-            click.ClickException: If writing config fails.
+            MurError: If writing config fails.
         """
         # Base allowed keys for all artifact types
         allowed_keys = {'name', 'version', 'type', 'description', 'dependencies', 'metadata'}
@@ -335,7 +380,7 @@ class BuildCommand(ArtifactCommand):
         if self.artifact_type == 'agent':
             allowed_keys.add('instructions')
 
-        filtered_config = {k: v for k, v in self.config.items() if k in allowed_keys}
+        filtered_config = {k: v for k, v in self.build_manifest.items() if k in allowed_keys}
 
         package_entry_path = artifact_path / 'src' / 'murmur' / f'{self.artifact_type}s' / artifact_path.name
 
@@ -346,7 +391,32 @@ class BuildCommand(ArtifactCommand):
 
             logger.debug(f'Written config keys to murmur-build.yaml: {list(filtered_config.keys())}')
         except Exception as e:
-            raise click.ClickException(f'Failed to write murmur-build.yaml: {e}')
+            raise MurError(code=205, message='Failed to write murmur-build.yaml', original_error=e)
+
+    def _build_package(self, artifact_path: Path) -> tuple[Path, list[str]]:
+        """Build the package for publishing.
+
+        Args:
+            artifact_path: Path to the artifact directory containing pyproject.toml
+
+        Returns:
+            tuple[Path, list[str]]: A tuple containing:
+                - dist_directory (Path): Directory containing the built files
+                - package_files (list[str]): List of built package filenames
+
+        Raises:
+            MurError: If the package build process fails.
+        """
+        try:
+            builder = ArtifactBuilder(artifact_path, self.verbose)
+            result = builder.build(self.artifact_type)
+            logger.debug(f"Built package files: {', '.join(result.package_files)}")
+            self.dist_dir = result.dist_dir
+            self.package_files = result.package_files
+            return result.dist_dir, result.package_files
+        except MurError as e:
+            e.handle()
+            raise  # Re-raise the MurError after handling
 
     def execute(self) -> None:
         """Execute the build command.
@@ -356,12 +426,14 @@ class BuildCommand(ArtifactCommand):
         If the artifact directory already exists, the build will be skipped.
 
         Raises:
-            click.ClickException: If build process fails at any stage.
+            MurError: If build process fails at any stage.
         """
         try:
-            # Determine artifact path
-            artifact_name = self.build_manifest['name'].lower().replace('-', '_')
+            # Validate the artifact name and version
+            is_valid_artifact_name_version(self.build_manifest['name'], self.build_manifest['version'])
 
+            # Determine artifact path
+            artifact_name = normalize_package_name(self.build_manifest['name'])
             artifact_path = self.current_dir / artifact_name
 
             if artifact_path.exists():
@@ -371,20 +443,28 @@ class BuildCommand(ArtifactCommand):
                 )
                 return
 
-            # Build artifact
-            self._create_directory_structure(artifact_path)
-            self._create_project_files(artifact_path)
+            spinner = Spinner()
+            try:
+                if not (self.verbose or logger.getEffectiveLevel() <= logging.DEBUG):
+                    spinner.start(f'Building {self.artifact_type} {artifact_name}')
 
-            # Write filtered version of build manifest
-            self._write_filtered_build_manifest(artifact_path)
+                # Build artifact
+                self._create_directory_structure(artifact_path)
+                self._create_project_files(artifact_path)
+                self._write_filtered_build_manifest(artifact_path)
+                self._build_package(artifact_path)
+
+            finally:
+                if not (self.verbose or logger.getEffectiveLevel() <= logging.DEBUG):
+                    spinner.stop()
 
             self.log_success(
                 f"Successfully built {self.artifact_type} "
                 f"{self.build_manifest['name']} {self.build_manifest['version']}"
             )
 
-        except Exception as e:
-            self.handle_error(e, f'Failed to build {self.artifact_type}')
+        except MurError as e:
+            e.handle()
 
 
 def build_command() -> click.Command:
