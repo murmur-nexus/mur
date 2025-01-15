@@ -49,11 +49,7 @@ class AuthenticationManager:
         except MurError:
             raise
         except Exception as e:
-            raise MurError(
-                code=501, 
-                message='Failed to initialize authentication', 
-                original_error=e
-            )
+            raise MurError(code=501, message='Failed to initialize authentication', original_error=e)
 
     def authenticate(self) -> str:
         """Get a valid access token, using cached credentials when possible.
@@ -171,11 +167,7 @@ class AuthenticationManager:
         except MurError:
             raise
         except Exception as e:
-            raise MurError(
-                code=501, 
-                message='Failed to save credentials', 
-                original_error=e
-            )
+            raise MurError(code=501, message='Failed to save credentials', original_error=e)
 
     def _prompt_and_authenticate(self) -> str:
         """Prompt for credentials and authenticate.
@@ -209,9 +201,7 @@ class AuthenticationManager:
                 return access_token
 
             raise MurError(
-                code=503, 
-                message='Invalid credentials', 
-                detail='Please check your username and password and try again'
+                code=503, message='Invalid credentials', detail='Please check your username and password and try again'
             )
 
         except click.Abort:
@@ -220,11 +210,7 @@ class AuthenticationManager:
         except MurError:
             raise
         except Exception as e:
-            raise MurError(
-                code=501, 
-                message='Authentication failed', 
-                original_error=e
-            )
+            raise MurError(code=501, message='Authentication failed', original_error=e)
 
     def clear_credentials(self) -> None:
         """Clear all stored credentials.
@@ -247,11 +233,7 @@ class AuthenticationManager:
         except MurError:
             raise
         except Exception as e:
-            raise MurError(
-                code=501, 
-                message='Failed to clear credentials', 
-                original_error=e
-            )
+            raise MurError(code=501, message='Failed to clear credentials', original_error=e)
 
     @classmethod
     def create(cls, verbose: bool = False, base_url: str = MURMUR_SERVER_URL) -> 'AuthenticationManager':
@@ -274,8 +256,4 @@ class AuthenticationManager:
             config_manager = ConfigManager()
             return cls(config_manager, base_url, verbose)
         except Exception as e:
-            raise MurError(
-                code=501, 
-                message='Failed to create authentication manager', 
-                original_error=e
-            )
+            raise MurError(code=501, message='Failed to create authentication manager', original_error=e)

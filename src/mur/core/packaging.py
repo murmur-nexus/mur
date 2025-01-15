@@ -13,7 +13,7 @@ from packaging.utils import is_normalized_name
 from packaging.version import InvalidVersion, Version
 from ruamel.yaml import YAML
 
-from ..utils.error_handler import MessageType, MurError
+from ..utils.error_handler import MurError
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ class ArtifactManifest:
         raise MurError(
             code=207,
             message=f"'{self.__class__.__name__}' object has no attribute '{name}'",
-            detail="The requested field is not present in the manifest.",
+            detail='The requested field is not present in the manifest.',
         )
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -257,10 +257,7 @@ class ArtifactBuilder:
         self.verbose = verbose
 
         if not self.project_dir.exists():
-            raise MurError(
-                code=206, 
-                message=f'Project directory not found: {self.project_dir}'
-            )
+            raise MurError(code=206, message=f'Project directory not found: {self.project_dir}')
 
     def _validate_project_structure(self) -> None:
         """Validate the project structure before building.
@@ -270,25 +267,17 @@ class ArtifactBuilder:
         """
         pyproject_file = self.project_dir / 'pyproject.toml'
         if not pyproject_file.exists():
-            raise MurError(
-                code=201, 
-                message='pyproject.toml not found in project directory'
-            )
+            raise MurError(code=201, message='pyproject.toml not found in project directory')
 
         # Validate murmur namespace structure
         src_dir = self.project_dir / 'src' / 'murmur'
         if not src_dir.exists():
-            raise MurError(
-                code=206, 
-                message='Invalid project structure: missing src/murmur directory'
-            )
+            raise MurError(code=206, message='Invalid project structure: missing src/murmur directory')
 
         # Check for build dependencies
         if not find_spec('build'):
             raise MurError(
-                code=300, 
-                message="Required 'build' module not found", 
-                detail='Install it with: pip install build.'
+                code=300, message="Required 'build' module not found", detail='Install it with: pip install build.'
             )
 
     def build(self, artifact_type: str) -> BuildResult:
@@ -337,12 +326,7 @@ class ArtifactBuilder:
             if e.stderr:
                 detail['stderr'] = e.stderr.decode()
                 debug_messages.append(f'stderr: {e.stderr}')
-            raise MurError(
-                code=307, 
-                message=error_msg, 
-                detail=detail, 
-                debug_messages=debug_messages
-            )
+            raise MurError(code=307, message=error_msg, detail=detail, debug_messages=debug_messages)
 
         dist_dir, package_files = self._get_build_artifacts()
         if self.verbose:
@@ -370,10 +354,7 @@ class ArtifactBuilder:
         """
         dist_dir = self.project_dir / 'dist'
         if not dist_dir.exists():
-            raise MurError(
-                code=307, 
-                message="Directory 'dist' not found"
-            )
+            raise MurError(code=307, message="Directory 'dist' not found")
 
         package_files = [f.name for f in dist_dir.iterdir() if self._is_package_file(f)]
 
@@ -381,10 +362,7 @@ class ArtifactBuilder:
             logger.info(f'Found {len(package_files)} package file(s).')
 
         if not package_files:
-            raise MurError(
-                code=307, 
-                message="No package files found in 'dist' directory"
-            )
+            raise MurError(code=307, message="No package files found in 'dist' directory")
 
         return dist_dir, package_files
 
@@ -415,27 +393,16 @@ class MetadataValidator:
         """Validate list of URLs."""
         if not isinstance(value, list):
             raise MurError(
-                code=207, 
-                message='Project URL must be a list of strings', 
-                detail=f'Got type: {type(value)}.'
+                code=207, message='Project URL must be a list of strings', detail=f'Got type: {type(value)}.'
             )
 
         for url in value:
             try:
                 result = urlparse(url)
                 if not all([result.scheme, result.netloc]):
-                    raise MurError(
-                        code=207, 
-                        message='Invalid URL format', 
-                        detail=f'Got value: {url}.'
-                    )
+                    raise MurError(code=207, message='Invalid URL format', detail=f'Got value: {url}.')
             except Exception as e:
-                raise MurError(
-                    code=207, 
-                    message='Invalid URL', 
-                    detail=f'Got value: {url}.', 
-                    original_error=e
-                )
+                raise MurError(code=207, message='Invalid URL', detail=f'Got value: {url}.', original_error=e)
 
     @staticmethod
     def validate_requires_python(value: str) -> None:
@@ -521,9 +488,7 @@ class MetadataValidator:
         """Validate distribution requirements."""
         if not isinstance(value, list):
             raise MurError(
-                code=207, 
-                message="Key 'requires_dist' must be a list of strings", 
-                detail=f'Got type: {type(value)}.'
+                code=207, message="Key 'requires_dist' must be a list of strings", detail=f'Got type: {type(value)}.'
             )
 
         for requirement in value:
@@ -534,9 +499,7 @@ class MetadataValidator:
         """Validate a single distribution requirement."""
         if not isinstance(requirement, str):
             raise MurError(
-                code=207, 
-                message='Each requirement must be a string', 
-                detail=f'Invalid value: {requirement}.'
+                code=207, message='Each requirement must be a string', detail=f'Invalid value: {requirement}.'
             )
 
         # Split requirement into package spec and environment marker

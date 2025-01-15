@@ -140,7 +140,7 @@ class ArtifactCommand:
                 code=200,
                 message='Cannot access the current directory',
                 detail="This usually happens when the current directory has been deleted or you don't have permissions. "
-                       "Please ensure you're in a valid directory and try again."
+                "Please ensure you're in a valid directory and try again.",
             )
 
     def handle_error(self, error: Exception, message: str) -> None:
@@ -156,12 +156,7 @@ class ArtifactCommand:
         else:
             error_msg = f'{message}: {error!s}'
             logger.error(error_msg, exc_info=True)
-            wrapped_error = MurError(
-                code=300, 
-                message=message, 
-                detail=error_msg, 
-                original_error=error
-            )
+            wrapped_error = MurError(code=300, message=message, detail=error_msg, original_error=error)
             wrapped_error.handle()
             sys.exit(wrapped_error.context.code)
 
@@ -203,16 +198,12 @@ class ArtifactCommand:
                 return ArtifactManifest(manifest_path, is_build_manifest=False)
             except Exception as e:
                 logger.debug(f'Error loading manifest {manifest_path}: {e!s}')
-                raise MurError(
-                    code=205,
-                    message='Failed to load murmur.yaml manifest',
-                    original_error=e
-                )
+                raise MurError(code=205, message='Failed to load murmur.yaml manifest', original_error=e)
 
         raise MurError(
             code=209,
             message='murmur.yaml manifest not found',
-            detail='The murmur.yaml manifest file was not found in the current directory'
+            detail='The murmur.yaml manifest file was not found in the current directory',
         )
 
     def _load_murmur_yaml_from_artifact(self) -> ArtifactManifest:
@@ -244,7 +235,7 @@ class ArtifactCommand:
             raise MurError(
                 code=201,
                 message='murmur-build.yaml not found',
-                detail='The murmur-build.yaml manifest file was not found in the current directory'
+                detail='The murmur-build.yaml manifest file was not found in the current directory',
             )
 
         else:
@@ -279,5 +270,5 @@ class ArtifactCommand:
             raise MurError(
                 code=201,
                 message='murmur-build.yaml not found',
-                detail='The murmur-build.yaml manifest file was not found in the artifact directory'
+                detail='The murmur-build.yaml manifest file was not found in the artifact directory',
             )

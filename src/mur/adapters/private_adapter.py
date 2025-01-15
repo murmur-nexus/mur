@@ -52,7 +52,7 @@ class PrivateRegistryAdapter(RegistryAdapter):
         """
         try:
             logger.debug(f'Publishing artifact: {manifest.to_dict()}')
-            
+
             repository_url = self.base_url.rstrip('/').replace('/simple', '')
             response = {
                 'status': 'pending',

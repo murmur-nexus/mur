@@ -42,7 +42,7 @@ class PublishCommand(ArtifactCommand):
                 raise MurError(
                     code=207,
                     message=f"Invalid artifact type '{self.artifact_type}' in murmur.yaml",
-                    detail="Must be either 'agent' or 'tool'."
+                    detail="Must be either 'agent' or 'tool'.",
                 )
         except Exception as e:
             if not isinstance(e, MurError):
@@ -118,7 +118,7 @@ class PublishCommand(ArtifactCommand):
                     raise MurError(
                         code=201,
                         message='No dist directory found',
-                        detail='Please run "mur build" first to build the artifact.'
+                        detail='Please run "mur build" first to build the artifact.',
                     )
                 dist_dir = artifact_dir
 
@@ -127,7 +127,7 @@ class PublishCommand(ArtifactCommand):
                 raise MurError(
                     code=211,
                     message='No artifact files found in dist directory',
-                    detail='Please run "mur build" first to build the artifact.'
+                    detail='Please run "mur build" first to build the artifact.',
                 )
 
             self._publish_files(self.manifest, dist_dir, artifact_files)

@@ -55,16 +55,12 @@ class BuildCommand(ArtifactCommand):
                     code=207,
                     message=f"Invalid artifact type '{self.artifact_type}'",
                     detail="The artifact type in murmur.yaml must be either 'agent' or 'tool'.",
-                    debug_messages=[f"Found artifact_type: {self.artifact_type}"]
+                    debug_messages=[f'Found artifact_type: {self.artifact_type}'],
                 )
 
         except Exception as e:
             if not isinstance(e, MurError):
-                raise MurError(
-                    code=207,
-                    message=str(e),
-                    original_error=e
-                )
+                raise MurError(code=207, message=str(e), original_error=e)
             raise
 
         self.verbose = verbose
@@ -79,7 +75,7 @@ class BuildCommand(ArtifactCommand):
                 code=207,
                 message=f"Invalid artifact type '{self.artifact_type}'",
                 detail="The artifact type in murmur-build.yaml must be either 'agent' or 'tool'.",
-                debug_messages=[f"Found artifact_type: {self.artifact_type}"]
+                debug_messages=[f'Found artifact_type: {self.artifact_type}'],
             )
         super().__init__(self.artifact_type, verbose)
         self.dist_dir = None
@@ -117,18 +113,14 @@ class BuildCommand(ArtifactCommand):
             raise MurError(
                 code=201,
                 message='murmur-build.yaml not found',
-                detail='The murmur-build.yaml manifest file was not found in the current directory'
+                detail='The murmur-build.yaml manifest file was not found in the current directory',
             )
 
         try:
             with open(manifest_file) as f:
                 return self.yaml.load(f)
         except Exception as e:
-            raise MurError(
-                code=205,
-                message='Failed to load murmur-build.yaml',
-                original_error=e
-            )
+            raise MurError(code=205, message='Failed to load murmur-build.yaml', original_error=e)
 
     def _create_directory_structure(self, artifact_path: Path) -> None:
         """Create the artifact directory structure.
@@ -166,7 +158,7 @@ class BuildCommand(ArtifactCommand):
                     raise MurError(
                         code=201,
                         message='main.py is missing',
-                        detail='Source files found but main.py is missing. main.py is required as the default entry point.'
+                        detail='Source files found but main.py is missing. main.py is required as the default entry point.',
                     )
                 elif (main_file := self.current_dir / 'src' / 'main.py').exists():
                     shutil.copy(main_file, package_path)
@@ -181,11 +173,7 @@ class BuildCommand(ArtifactCommand):
                 logger.debug(f'Created default main.py with {artifact_path.name} function')
 
         except Exception as e:
-            raise MurError(
-                code=209,
-                message='Failed to create directory structure',
-                original_error=e
-            )
+            raise MurError(code=209, message='Failed to create directory structure', original_error=e)
 
     def _create_project_files(self, artifact_path: Path) -> None:
         """Create all necessary project files.
@@ -213,11 +201,7 @@ class BuildCommand(ArtifactCommand):
                 logger.info('Created project configuration files')
 
         except Exception as e:
-            raise MurError(
-                code=210,
-                message='Failed to create project files',
-                original_error=e
-            )
+            raise MurError(code=210, message='Failed to create project files', original_error=e)
 
     def _generate_pyproject_toml(self) -> str:
         """Generate pyproject.toml content.
@@ -407,11 +391,7 @@ class BuildCommand(ArtifactCommand):
 
             logger.debug(f'Written config keys to murmur-build.yaml: {list(filtered_config.keys())}')
         except Exception as e:
-            raise MurError(
-                code=205,
-                message='Failed to write murmur-build.yaml',
-                original_error=e
-            )
+            raise MurError(code=205, message='Failed to write murmur-build.yaml', original_error=e)
 
     def _build_package(self, artifact_path: Path) -> tuple[Path, list[str]]:
         """Build the package for publishing.

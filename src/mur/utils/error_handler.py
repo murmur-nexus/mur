@@ -78,9 +78,9 @@ class MurError(Exception):
         206: 'Artifact Path Error',
         207: 'Invalid Manifest Value',
         208: 'Failed Local Storage',
-		209: 'Failed Creating Directory',
-		210: 'Failed Creating File',
-		211: 'Directory Not Found',
+        209: 'Failed Creating Directory',
+        210: 'Failed Creating File',
+        211: 'Directory Not Found',
         # Category 3: Local Artifact State
         300: 'General Artifact Error',
         301: 'Artifact Already Installed',

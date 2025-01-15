@@ -1,13 +1,11 @@
 import json
 import logging
 from pathlib import Path
-from threading import Lock, TimeoutError
+from threading import Lock
 from typing import Optional
 
-import click
-
 from ..utils.constants import CONFIG_FILE, DEFAULT_CACHE_DIR, DEFAULT_TIMEOUT
-from ..utils.error_handler import MurError, MessageType
+from ..utils.error_handler import MessageType, MurError
 
 logger = logging.getLogger(__name__)
 
@@ -65,18 +63,18 @@ class ConfigManager:
         except json.JSONDecodeError as e:
             raise MurError(
                 code=204,
-                message="Invalid configuration file format",
-                detail="The configuration file is not valid JSON",
+                message='Invalid configuration file format',
+                detail='The configuration file is not valid JSON',
                 original_error=e,
-                type=MessageType.WARNING
+                type=MessageType.WARNING,
             )
         except Exception as e:
             raise MurError(
                 code=200,
-                message="Failed to load configuration file",
-                detail="Check file permissions and try again",
+                message='Failed to load configuration file',
+                detail='Check file permissions and try again',
                 original_error=e,
-                type=MessageType.WARNING
+                type=MessageType.WARNING,
             )
 
     def save_config(self) -> None:
@@ -84,8 +82,8 @@ class ConfigManager:
         if not self._lock.acquire(timeout=1.0):
             raise MurError(
                 code=208,
-                message="Failed to acquire lock for saving configuration",
-                detail="Another process might be updating the configuration"
+                message='Failed to acquire lock for saving configuration',
+                detail='Another process might be updating the configuration',
             )
         try:
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -94,9 +92,9 @@ class ConfigManager:
         except Exception as e:
             raise MurError(
                 code=200,
-                message="Failed to save configuration",
-                detail="Check file permissions and available disk space",
-                original_error=e
+                message='Failed to save configuration',
+                detail='Check file permissions and available disk space',
+                original_error=e,
             )
         finally:
             self._lock.release()

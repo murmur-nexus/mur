@@ -143,9 +143,9 @@ class PublicRegistryAdapter(RegistryAdapter):
         # Handle specific error messages
         if 'Token has expired' in detail:
             raise MurError(
-                code=504, 
-                message='Token has expired. Please log in again', 
-                detail='Please run `mur logout` and try again.'
+                code=504,
+                message='Token has expired. Please log in again',
+                detail='Please run `mur logout` and try again.',
             )
         if 'Could not validate credentials' in detail:
             raise MurError(502, 'Could not validate credentials')
