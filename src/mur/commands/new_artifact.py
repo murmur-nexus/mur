@@ -92,7 +92,7 @@ class NewArtifactCommand(ArtifactCommand):
         # Convert hyphens to underscores for valid Python variable name
         variable_name = self.name.replace('-', '_') if self.name else 'my_agent'
 
-        template = 'from murmur_slim.build import ActivateAgent\n'
+        template = 'from murmur.build import ActivateAgent\n'
         template += '\n'
         template += f'{variable_name} = ActivateAgent()\n'
         try:

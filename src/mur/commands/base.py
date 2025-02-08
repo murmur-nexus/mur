@@ -241,9 +241,14 @@ class ArtifactCommand:
         else:
             # For other commands, look in both possible artifact directory structures
             for artifact_type in ['agent', 'tool']:
-                # Get normalized name from manifest
-                normalized_artifact_name = normalize_package_name(self.current_dir.name)
+                # Get normalized name from manifest from pre-build manifest
+                pre_build_manifest_path = self.current_dir / 'murmur-build.yaml'
+                if not pre_build_manifest_path.exists():
+                    raise
 
+                pre_build_manifest = ArtifactManifest(pre_build_manifest_path, is_build_manifest=True)
+                normalized_artifact_name = normalize_package_name(pre_build_manifest.name)
+                
                 # Try path with artifact name directory
                 artifact_path1 = (
                     self.current_dir
@@ -255,7 +260,6 @@ class ArtifactCommand:
                 )
                 # Try direct path
                 artifact_path2 = self.current_dir / 'src' / 'murmur' / f'{artifact_type}s' / normalized_artifact_name
-
                 for artifact_entry_path in [artifact_path1, artifact_path2]:
                     manifest_file_path = artifact_entry_path / 'murmur-build.yaml'
                     if manifest_file_path.exists():
