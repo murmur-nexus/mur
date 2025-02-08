@@ -81,6 +81,7 @@ class MurError(Exception):
         209: 'Failed Creating Directory',
         210: 'Failed Creating File',
         211: 'Directory Not Found',
+        212: 'File already exists',
         # Category 3: Local Artifact State
         300: 'General Artifact Error',
         301: 'Artifact Already Installed',
