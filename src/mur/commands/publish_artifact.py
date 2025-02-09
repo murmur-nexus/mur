@@ -110,7 +110,7 @@ class PublishCommand(ArtifactCommand):
 
             # Look for dist directory in current directory first, then in artifact directory
             dist_dir = self.current_dir / 'dist'
-            normalized_artifact_name = normalize_package_name(self.current_dir.name)
+            normalized_artifact_name = normalize_package_name(self.manifest.name)
             if not dist_dir.exists() or (not any(dist_dir.glob('*.whl')) and not any(dist_dir.glob('*.tar.gz'))):
                 # Try artifact directory
                 artifact_dir = self.current_dir / normalized_artifact_name / 'dist'
