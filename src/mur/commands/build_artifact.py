@@ -168,8 +168,8 @@ class BuildCommand(ArtifactCommand):
             else:
                 # Create default main.py if no source files exist
                 with open(package_path / 'main.py', 'w') as f:
-                    f.write(f'def {artifact_path.name}():\n')
-                    f.write('    pass\n')
+                    f.write('from murmur.build import ActivateAgent\n\n')
+                    f.write(f"{artifact_path.name} = ActivateAgent('{artifact_path.name}')\n")
                 logger.debug(f'Created default main.py with {artifact_path.name} function')
 
         except Exception as e:

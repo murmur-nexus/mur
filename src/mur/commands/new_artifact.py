@@ -4,6 +4,7 @@ from typing import Literal
 import click
 from ruamel.yaml import YAML
 
+from ..utils.error_handler import MurError
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
@@ -53,19 +54,21 @@ class NewArtifactCommand(ArtifactCommand):
         config_file = self.current_dir / 'murmur-build.yaml'
 
         if config_file.exists():
-            raise click.ClickException('murmur-build.yaml already exists in current directory')
+            raise MurError(
+                code=212,
+                message='murmur-build.yaml already exists in current directory',
+                detail=f'Please remove the existing murmur-build.yaml file before running `mur new {self.artifact_type} {self.name}`',
+            )
 
         template = {
             'name': self.name if self.name else '',
             'type': self.artifact_type,
-            'version': '0.1.0',
+            'version': '0.0.1',
             'description': '',
+            'instructions': ['You are a helpful assistant.'],
             'metadata': {
                 'author': '',
-                'license': '',
-                'tags': [],
             },
-            'instructions': ['You are a friendly assistant.'],
         }
 
         try:
@@ -75,7 +78,31 @@ class NewArtifactCommand(ArtifactCommand):
                 logger.info(f'Created murmur-build.yaml with {self.artifact_type} template')
             logger.debug(f'Created build configuration at {config_file}')
         except Exception as e:
-            raise click.ClickException(f'Failed to create murmur-build.yaml: {e}')
+            raise MurError(code=210, message='Failed to create murmur-build.yaml', original_error=e)
+
+    def _create_main_file(self) -> None:
+        """Create the src/main.py file with template code.
+
+        Raises:
+            click.ClickException: If file creation fails.
+        """
+        src_dir = self.current_dir / 'src'
+        src_dir.mkdir(exist_ok=True)
+        main_file = src_dir / 'main.py'
+
+        # Convert hyphens to underscores for valid Python variable name
+        variable_name = self.name.replace('-', '_') if self.name else 'my_agent'
+
+        template = 'from murmur.build import ActivateAgent\n'
+        template += '\n'
+        template += f'{variable_name} = ActivateAgent("{variable_name}")\n'
+        try:
+            with open(main_file, 'w') as f:
+                f.write(template)
+            if self.verbose:
+                logger.debug('Created src/main.py template')
+        except Exception as e:
+            raise MurError(code=210, message=f'Failed to create new {self.artifact_type}', original_error=e)
 
     def execute(self) -> None:
         """Execute the new artifact command.
@@ -87,12 +114,14 @@ class NewArtifactCommand(ArtifactCommand):
         """
         try:
             self._create_build_manifest()
+            if self.artifact_type == 'agent':
+                self._create_main_file()
             self.log_success(
                 f'Successfully created new {self.artifact_type} template\n'
                 f'Please edit murmur-build.yaml to configure your {self.artifact_type}'
             )
-        except Exception as e:
-            self.handle_error(e, f'Failed to create new {self.artifact_type}')
+        except MurError as e:
+            e.handle()
 
 
 def new_command() -> click.Command:

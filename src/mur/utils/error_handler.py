@@ -81,6 +81,7 @@ class MurError(Exception):
         209: 'Failed Creating Directory',
         210: 'Failed Creating File',
         211: 'Directory Not Found',
+        212: 'File already exists',
         # Category 3: Local Artifact State
         300: 'General Artifact Error',
         301: 'Artifact Already Installed',
@@ -91,6 +92,7 @@ class MurError(Exception):
         306: 'Local Artifact Metadata Invalid',
         307: 'Artifact Build Failed',
         308: 'Missing Dependencies',
+        309: 'Failed to Uninstall Artifact',
         # Category 5: Authentication/Authorization
         500: 'General Auth Error',
         501: 'Authentication Error',
