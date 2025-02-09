@@ -248,7 +248,7 @@ class ArtifactCommand:
 
                 pre_build_manifest = ArtifactManifest(pre_build_manifest_path, is_build_manifest=True)
                 normalized_artifact_name = normalize_package_name(pre_build_manifest.name)
-                
+
                 # Try path with artifact name directory
                 artifact_path1 = (
                     self.current_dir

@@ -4,6 +4,7 @@ from typing import Literal
 import click
 from ruamel.yaml import YAML
 
+from ..utils.error_handler import MurError
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ class NewArtifactCommand(ArtifactCommand):
                 logger.info(f'Created murmur-build.yaml with {self.artifact_type} template')
             logger.debug(f'Created build configuration at {config_file}')
         except Exception as e:
-            raise MurError(code=210, message=f'Failed to create murmur-build.yaml', original_error=e)
+            raise MurError(code=210, message='Failed to create murmur-build.yaml', original_error=e)
 
     def _create_main_file(self) -> None:
         """Create the src/main.py file with template code.
