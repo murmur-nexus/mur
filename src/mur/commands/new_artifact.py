@@ -94,7 +94,7 @@ class NewArtifactCommand(ArtifactCommand):
 
         template = 'from murmur.build import ActivateAgent\n'
         template += '\n'
-        template += f'{variable_name} = ActivateAgent()\n'
+        template += f'{variable_name} = ActivateAgent("{variable_name}")\n'
         try:
             with open(main_file, 'w') as f:
                 f.write(template)
