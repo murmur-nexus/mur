@@ -76,8 +76,8 @@ class AuthenticationManager:
             if (username := str(self.config.get('username'))) and (password := self.cache.load_password()):
                 if self.verbose:
                     logger.info('Authenticating with cached credentials')
-                if access_token := self._authenticate(username, password):
-                    return access_token
+                if username := self._authenticate(username, password):
+                    return username
 
             # Need to prompt for credentials
             return self._prompt_and_authenticate()
@@ -123,23 +123,36 @@ class AuthenticationManager:
             On successful authentication, credentials are automatically cached.
         """
         try:
-            url = f'{self.base_url}/auth/login'
-            payload = {'grant_type': 'password', 'username': username, 'password': password}
+            url = f'{self.base_url}/api/v1/auth/login'
+            query_params = {'grant_type': 'password'}
+            payload = {'username': username, 'password': password}
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
-            logger.debug(f'Authenticating user at {url}')
+            # Disable SSL verification for non-HTTPS URLs
+            verify_ssl = self.base_url.startswith('https://')
+            
+            response = requests.post(
+                url, 
+                params=query_params,
+                headers=headers, 
+                data=payload, 
+                timeout=DEFAULT_TIMEOUT,
+                verify=verify_ssl
+            )
 
-            response = requests.post(url, headers=headers, data=payload, timeout=DEFAULT_TIMEOUT)
+            logger.debug(f'Access token: {response.json().get("access_token")}')
 
             if response.status_code == 200:
                 data = response.json()
                 if access_token := data.get('access_token'):
                     self._save_credentials(username, password, access_token)
-                    return access_token
+                    username = data.get('user', {}).get('username')
+                    return username
 
             return None
 
         except Exception as e:
+            logger.debug(f'Error: {e}')
             raise MurError(
                 code=501,
                 message='Authentication failed',
