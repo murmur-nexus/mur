@@ -123,7 +123,7 @@ class AuthenticationManager:
             On successful authentication, credentials are automatically cached.
         """
         try:
-            url = f'{self.base_url}/api/v1/auth/login'
+            url = f'{self.base_url}/auth/login'
             query_params = {'grant_type': 'password'}
             payload = {'username': username, 'password': password}
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
@@ -140,10 +140,10 @@ class AuthenticationManager:
                 verify=verify_ssl
             )
 
-            logger.debug(f'Access token: {response.json().get("access_token")}')
-
             if response.status_code == 200:
                 data = response.json()
+                logger.debug(f'Access token: {data.get("access_token")}')
+                
                 if access_token := data.get('access_token'):
                     self._save_credentials(username, password, access_token)
                     username = data.get('user', {}).get('username')
