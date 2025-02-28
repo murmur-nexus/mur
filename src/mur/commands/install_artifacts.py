@@ -13,6 +13,7 @@ from ..utils.constants import MURMUR_EXTRAS_INDEX_URL, MURMUR_INDEX_URL, MURMURR
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
 from .base import ArtifactCommand
+from ..core.auth import AuthenticationManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,10 @@ class InstallArtifactCommand(ArtifactCommand):
             verbose: Whether to enable verbose output
         """
         super().__init__('install', verbose)
+        
+        # Add auth manager initialization
+        self.auth_manager = AuthenticationManager.create(verbose=verbose)
+        self.username = self.auth_manager.config.get('username')
 
     def _get_murmur_packages_dir(self, artifact_type: str) -> Path:
         """Get the murmur packages directory path.
@@ -216,6 +221,23 @@ class InstallArtifactCommand(ArtifactCommand):
                 debug_messages=["importlib.util.find_spec('murmur') returned None"],
             )
 
+    def _remove_scope(self, package_name: str) -> str:
+        """Remove username scope from package name if present.
+
+        Args:
+            package_name (str): Package name that might include username scope
+
+        Returns:
+            str: Package name with username scope removed if it was present
+        """
+        if not self.username:
+            return package_name
+            
+        scope_prefix = f"{self.username}_"
+        if package_name.startswith(scope_prefix):
+            return package_name[len(scope_prefix):]
+        return package_name
+
     def _update_init_file(self, package_name: str, artifact_type: str) -> None:
         """Update __init__.py file with import statement.
 
@@ -228,21 +250,25 @@ class InstallArtifactCommand(ArtifactCommand):
         """
         init_path = self._get_murmur_packages_dir(artifact_type) / '__init__.py'
 
-        # Normalize package name to lowercase and replace hyphens with underscores
-        package_name_pep8 = package_name.lower().replace('-', '_')
+        # Normalize package name to lowercase, replace hyphens with underscores,
+        # and remove username scope if present
+        package_name_pep8 = self._remove_scope(package_name.lower().replace('-', '_'))
 
-        import_line = f'from .{package_name_pep8}.main import {package_name_pep8}\n'
+        import_line = f'from .{package_name_pep8}.main import {package_name_pep8}'
 
         # Create file if it doesn't exist
         if not init_path.exists():
-            init_path.write_text(import_line)
+            init_path.write_text(import_line + '\n')
             return
 
-        # Check if import already exists
+        # Check if import already exists and ensure proper line endings
         current_content = init_path.read_text()
+        if not current_content.endswith('\n'):
+            current_content += '\n'
+            
         if import_line not in current_content:
-            with open(init_path, 'a') as f:
-                f.write(import_line)
+            with open(init_path, 'w') as f:
+                f.write(current_content + import_line + '\n')
 
     def _install_artifact_group(self, artifacts: list[dict], artifact_type: str) -> None:
         """Install a group of artifacts of the same type.
