@@ -63,6 +63,27 @@ def main() -> None:
 
 @main.command()
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
+def login(verbose: bool) -> None:
+    """Authenticate with the Murmur service.
+
+    Initiates the authentication flow to obtain and store credentials.
+
+    Args:
+        verbose (bool): If True, enables detailed output logging.
+
+    Raises:
+        click.Abort: If authentication fails.
+    """
+    try:
+        auth_manager = AuthenticationManager.create(verbose)
+        username = auth_manager.authenticate()
+        click.echo(f'Login successful for {username}')
+    except MurError as e:
+        e.handle()
+
+
+@main.command()
+@click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
 def logout(verbose: bool) -> None:
     """Clear stored credentials and tokens.
 
