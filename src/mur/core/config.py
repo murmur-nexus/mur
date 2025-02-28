@@ -60,6 +60,8 @@ class ConfigManager:
                     file_config = json.load(f)
                 self.config.update(file_config)
                 logger.debug(f'Loaded configuration from {self.config_file}')
+            else:
+                logger.debug('Config file does not exist')
         except json.JSONDecodeError as e:
             raise MurError(
                 code=204,
@@ -89,6 +91,7 @@ class ConfigManager:
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.config_file, 'w') as f:
                 json.dump(self.config, f, indent=4)
+            logger.debug(f'Successfully saved config to {self.config_file}')
         except Exception as e:
             raise MurError(
                 code=200,
@@ -106,4 +109,6 @@ class ConfigManager:
             ConfigDict: A copy of the current configuration dictionary to prevent
                 direct modification of internal state.
         """
+        # Reload config before returning
+        self._load_config()
         return self.config.copy()

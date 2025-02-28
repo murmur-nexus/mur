@@ -128,7 +128,6 @@ class AuthenticationManager:
             payload = {'username': username, 'password': password}
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
-            # Disable SSL verification for non-HTTPS URLs
             verify_ssl = self.base_url.startswith('https://')
             
             response = requests.post(
@@ -145,8 +144,9 @@ class AuthenticationManager:
                 logger.debug(f'Access token: {data.get("access_token")}')
                 
                 if access_token := data.get('access_token'):
+                    # Get username from response if available, otherwise use input username
+                    username = data.get('user', {}).get('username', username)
                     self._save_credentials(username, password, access_token)
-                    username = data.get('user', {}).get('username')
                     return username
 
             return None
@@ -161,20 +161,20 @@ class AuthenticationManager:
             )
 
     def _save_credentials(self, username: str, password: str, access_token: str) -> None:
-        """Save credentials for future use.
-
-        Args:
-            username: Username to save
-            password: Password to save
-            access_token: Access token to save
-
-        Raises:
-            MurError: If credentials cannot be saved
-        """
+        """Save credentials for future use."""
         try:
             self.cache.save_access_token(access_token)
-            self.config['username'] = username
+            
+            # Get the current config from the manager and update it
+            config = self.config_manager.config
+            config['username'] = username
+            
+            # Save the updated config
             self.config_manager.save_config()
+            
+            # Update our local copy
+            self.config = self.config_manager.get_config()
+            
             self.cache.save_password(password)
             logger.debug('Saved credentials')
         except MurError:
