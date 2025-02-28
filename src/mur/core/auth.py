@@ -240,7 +240,7 @@ class AuthenticationManager:
             self.cache.clear_access_token()
             self.cache.clear_password()
             if 'username' in self.config:
-                del self.config['username']
+                self.config_manager.config.pop('username', None)
                 self.config_manager.save_config()
             logger.debug('Cleared all credentials')
         except MurError:
