@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 from ruamel.yaml import YAML
 
+from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_package_name
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
@@ -41,6 +42,14 @@ class BuildCommand(ArtifactCommand):
         """
         try:
             super().__init__('build', verbose)
+
+            # Add auth manager initialization
+            self.auth_manager = AuthenticationManager.create(verbose=verbose)
+            self.username = self.auth_manager.config.get('username')
+            if not self.username:
+                raise MurError(
+                    code=401, message='No authenticated user found', detail="Please login first using 'mur login'"
+                )
 
             # Load and validate manifest
             try:
@@ -240,7 +249,7 @@ class BuildCommand(ArtifactCommand):
         """
         content = [
             '[project]',
-            f'name = "{self.build_manifest["name"].lower()}"',
+            f'name = "{self.username}.{self.build_manifest["name"].lower()}"',
             f'version = "{self.build_manifest["version"]}"',
         ]
 
@@ -478,7 +487,10 @@ def build_command() -> click.Command:
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
     def build(verbose: bool) -> None:
         """Build a new artifact project."""
-        cmd = BuildCommand(verbose)
-        cmd.execute()
+        try:
+            cmd = BuildCommand(verbose)
+            cmd.execute()
+        except MurError as e:
+            e.handle()
 
     return build

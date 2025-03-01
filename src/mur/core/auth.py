@@ -124,22 +124,30 @@ class AuthenticationManager:
         """
         try:
             url = f'{self.base_url}/auth/login'
-            payload = {'grant_type': 'password', 'username': username, 'password': password}
+            query_params = {'grant_type': 'password'}
+            payload = {'username': username, 'password': password}
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
-            logger.debug(f'Authenticating user at {url}')
+            verify_ssl = self.base_url.startswith('https://')
 
-            response = requests.post(url, headers=headers, data=payload, timeout=DEFAULT_TIMEOUT)
+            response = requests.post(
+                url, params=query_params, headers=headers, data=payload, timeout=DEFAULT_TIMEOUT, verify=verify_ssl
+            )
 
             if response.status_code == 200:
                 data = response.json()
+                logger.debug(f'Access token: {data.get("access_token")}')
+
                 if access_token := data.get('access_token'):
+                    # Get username from response if available, otherwise use input username
+                    username = data.get('user', {}).get('username', username)
                     self._save_credentials(username, password, access_token)
-                    return access_token
+                    return username
 
             return None
 
         except Exception as e:
+            logger.debug(f'Error: {e}')
             raise MurError(
                 code=501,
                 message='Authentication failed',
@@ -148,20 +156,20 @@ class AuthenticationManager:
             )
 
     def _save_credentials(self, username: str, password: str, access_token: str) -> None:
-        """Save credentials for future use.
-
-        Args:
-            username: Username to save
-            password: Password to save
-            access_token: Access token to save
-
-        Raises:
-            MurError: If credentials cannot be saved
-        """
+        """Save credentials for future use."""
         try:
             self.cache.save_access_token(access_token)
-            self.config['username'] = username
+
+            # Get the current config from the manager and update it
+            config = self.config_manager.config
+            config['username'] = username
+
+            # Save the updated config
             self.config_manager.save_config()
+
+            # Update our local copy
+            self.config = self.config_manager.get_config()
+
             self.cache.save_password(password)
             logger.debug('Saved credentials')
         except MurError:
@@ -227,7 +235,7 @@ class AuthenticationManager:
             self.cache.clear_access_token()
             self.cache.clear_password()
             if 'username' in self.config:
-                del self.config['username']
+                self.config_manager.config.pop('username', None)
                 self.config_manager.save_config()
             logger.debug('Cleared all credentials')
         except MurError:

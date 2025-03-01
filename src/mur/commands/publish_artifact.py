@@ -4,6 +4,7 @@ from pathlib import Path
 import click
 
 from ..adapters import PrivateRegistryAdapter, PublicRegistryAdapter
+from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactManifest, normalize_package_name
 from ..utils.constants import MURMUR_INDEX_URL, MURMURRC_PATH
 from ..utils.error_handler import MurError
@@ -31,6 +32,10 @@ class PublishCommand(ArtifactCommand):
         try:
             super().__init__('publish', verbose)
 
+            # Add auth manager initialization
+            self.auth_manager = AuthenticationManager.create(verbose=verbose)
+            self.username = self.auth_manager.config.get('username')
+
             # Load manifest and determine artifact type
             try:
                 self.manifest = self._load_murmur_yaml_from_artifact()
@@ -49,6 +54,23 @@ class PublishCommand(ArtifactCommand):
                 raise MurError(code=100, message=str(e))
             raise
 
+    def _remove_scope(self, package_name: str) -> str:
+        """Remove username scope from package name if present.
+
+        Args:
+            package_name (str): Package name that might include username scope
+
+        Returns:
+            str: Package name with username scope removed if it was present
+        """
+        if not self.username:
+            return package_name
+
+        scope_prefix = f'{self.username}_'
+        if package_name.startswith(scope_prefix):
+            return package_name[len(scope_prefix) :]
+        return package_name
+
     def _publish_files(self, manifest: ArtifactManifest, dist_dir: Path, artifact_files: list[str]) -> None:
         """Publish built artifact files to registry.
 
@@ -56,10 +78,27 @@ class PublishCommand(ArtifactCommand):
             manifest (ArtifactManifest): Artifact manifest containing metadata
             dist_dir (Path): Directory containing built files
             artifact_files (list[str]): List of artifact files to publish
+
+        Raises:
+            MurError: If package names don't match normalized format
         """
         try:
             if self.verbose:
                 logger.info('Publishing artifact...')
+
+            # Validate package names in build files
+            normalized_name = normalize_package_name(manifest.name)
+            for file_name in artifact_files:
+                # Extract package name from file (everything before first dash)
+                package_name = file_name.split('-')[0]
+                # Remove scope if present before comparing
+                unscoped_package_name = self._remove_scope(package_name)
+                if normalize_package_name(unscoped_package_name) != normalized_name:
+                    raise MurError(
+                        code=603,
+                        message='Invalid package name in build files',
+                        detail=f'Expected normalized name "{normalized_name}" but found "{unscoped_package_name}".',
+                    )
 
             manifest.type = self.artifact_type
             registered_artifact = self.registry.publish_artifact(manifest)

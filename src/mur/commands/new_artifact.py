@@ -156,7 +156,7 @@ def new_command() -> click.Command:
 
         # Check for invalid characters
         if not all(c.isalnum() or c == '-' for c in value):
-            raise click.BadParameter('Name must contain only letters, numbers, and hyphens')
+            raise click.BadParameter('Name must contain only lowercase letters, numbers, and hyphens')
 
         # Check for double hyphens
         if '--' in value:
