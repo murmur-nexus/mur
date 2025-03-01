@@ -9,11 +9,11 @@ import click
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError, RequestException, Timeout
 
+from ..core.auth import AuthenticationManager
 from ..utils.constants import MURMUR_EXTRAS_INDEX_URL, MURMUR_INDEX_URL, MURMURRC_PATH
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
 from .base import ArtifactCommand
-from ..core.auth import AuthenticationManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class InstallArtifactCommand(ArtifactCommand):
             verbose: Whether to enable verbose output
         """
         super().__init__('install', verbose)
-        
+
         # Add auth manager initialization
         self.auth_manager = AuthenticationManager.create(verbose=verbose)
         self.username = self.auth_manager.config.get('username')
@@ -232,10 +232,10 @@ class InstallArtifactCommand(ArtifactCommand):
         """
         if not self.username:
             return package_name
-            
-        scope_prefix = f"{self.username}_"
+
+        scope_prefix = f'{self.username}_'
         if package_name.startswith(scope_prefix):
-            return package_name[len(scope_prefix):]
+            return package_name[len(scope_prefix) :]
         return package_name
 
     def _update_init_file(self, package_name: str, artifact_type: str) -> None:
@@ -265,7 +265,7 @@ class InstallArtifactCommand(ArtifactCommand):
         current_content = init_path.read_text()
         if not current_content.endswith('\n'):
             current_content += '\n'
-            
+
         if import_line not in current_content:
             with open(init_path, 'w') as f:
                 f.write(current_content + import_line + '\n')

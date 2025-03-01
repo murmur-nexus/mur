@@ -5,11 +5,11 @@ from pathlib import Path
 import click
 from ruamel.yaml import YAML
 
+from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_package_name
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
 from .base import ArtifactCommand
-from ..core.auth import AuthenticationManager
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +48,7 @@ class BuildCommand(ArtifactCommand):
             self.username = self.auth_manager.config.get('username')
             if not self.username:
                 raise MurError(
-                    code=401,
-                    message="No authenticated user found",
-                    detail="Please login first using 'mur login'"
+                    code=401, message='No authenticated user found', detail="Please login first using 'mur login'"
                 )
 
             # Load and validate manifest

@@ -76,8 +76,8 @@ class AuthenticationManager:
             if (username := str(self.config.get('username'))) and (password := self.cache.load_password()):
                 if self.verbose:
                     logger.info('Authenticating with cached credentials')
-                if username := self._authenticate(username, password):
-                    return username
+                if access_token := self._authenticate(username, password):
+                    return access_token
 
             # Need to prompt for credentials
             return self._prompt_and_authenticate()
@@ -129,20 +129,15 @@ class AuthenticationManager:
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
             verify_ssl = self.base_url.startswith('https://')
-            
+
             response = requests.post(
-                url, 
-                params=query_params,
-                headers=headers, 
-                data=payload, 
-                timeout=DEFAULT_TIMEOUT,
-                verify=verify_ssl
+                url, params=query_params, headers=headers, data=payload, timeout=DEFAULT_TIMEOUT, verify=verify_ssl
             )
 
             if response.status_code == 200:
                 data = response.json()
                 logger.debug(f'Access token: {data.get("access_token")}')
-                
+
                 if access_token := data.get('access_token'):
                     # Get username from response if available, otherwise use input username
                     username = data.get('user', {}).get('username', username)
@@ -164,17 +159,17 @@ class AuthenticationManager:
         """Save credentials for future use."""
         try:
             self.cache.save_access_token(access_token)
-            
+
             # Get the current config from the manager and update it
             config = self.config_manager.config
             config['username'] = username
-            
+
             # Save the updated config
             self.config_manager.save_config()
-            
+
             # Update our local copy
             self.config = self.config_manager.get_config()
-            
+
             self.cache.save_password(password)
             logger.debug('Saved credentials')
         except MurError:

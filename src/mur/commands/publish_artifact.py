@@ -4,11 +4,11 @@ from pathlib import Path
 import click
 
 from ..adapters import PrivateRegistryAdapter, PublicRegistryAdapter
+from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactManifest, normalize_package_name
 from ..utils.constants import MURMUR_INDEX_URL, MURMURRC_PATH
 from ..utils.error_handler import MurError
 from .base import ArtifactCommand
-from ..core.auth import AuthenticationManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class PublishCommand(ArtifactCommand):
         """
         try:
             super().__init__('publish', verbose)
-            
+
             # Add auth manager initialization
             self.auth_manager = AuthenticationManager.create(verbose=verbose)
             self.username = self.auth_manager.config.get('username')
@@ -65,10 +65,10 @@ class PublishCommand(ArtifactCommand):
         """
         if not self.username:
             return package_name
-        
-        scope_prefix = f"{self.username}_"
+
+        scope_prefix = f'{self.username}_'
         if package_name.startswith(scope_prefix):
-            return package_name[len(scope_prefix):]
+            return package_name[len(scope_prefix) :]
         return package_name
 
     def _publish_files(self, manifest: ArtifactManifest, dist_dir: Path, artifact_files: list[str]) -> None:
@@ -97,7 +97,7 @@ class PublishCommand(ArtifactCommand):
                     raise MurError(
                         code=603,
                         message='Invalid package name in build files',
-                        detail=f'Expected normalized name "{normalized_name}" but found "{unscoped_package_name}".'
+                        detail=f'Expected normalized name "{normalized_name}" but found "{unscoped_package_name}".',
                     )
 
             manifest.type = self.artifact_type
