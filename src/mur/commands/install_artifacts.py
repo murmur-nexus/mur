@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError, RequestException, Timeout
+import importlib.metadata
 
 from ..core.auth import AuthenticationManager
 from ..utils.constants import MURMUR_EXTRAS_INDEX_URL, MURMUR_INDEX_URL, MURMURRC_PATH
@@ -50,10 +51,34 @@ class InstallArtifactCommand(ArtifactCommand):
         site_packages.mkdir(parents=True, exist_ok=True)
         return site_packages
 
+    def _is_package_installed(self, package_name: str, version: str) -> bool:
+        """Check if package is already installed with specified version.
+
+        Args:
+            package_name (str): Name of the package
+            version (str): Version to check for, or 'latest'
+
+        Returns:
+            bool: True if package is installed with matching version
+        """
+        try:
+            installed_version = importlib.metadata.version(package_name)
+            if version.lower() == 'latest' or version == '':
+                return True
+            return installed_version == version
+        except importlib.metadata.PackageNotFoundError:
+            return False
+
     def _install_artifact(self, package_name: str, version: str, artifact_type: str) -> None:
         """Install a package using pip with configured index URLs."""
         try:
             package_spec = package_name if version.lower() in ['latest', ''] else f'{package_name}=={version}'
+            
+            # Check if package is already installed
+            if self._is_package_installed(package_name, version):
+                logger.info(f"Skipping {package_spec} - already installed")
+                return
+
             index_url, extra_index_urls = self._get_index_urls_from_murmurrc(MURMURRC_PATH)
 
             if index_url == MURMUR_INDEX_URL:
