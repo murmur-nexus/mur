@@ -291,3 +291,27 @@ class AuthenticationManager:
             return cls(config_manager, base_url, verbose)
         except Exception as e:
             raise MurError(code=501, message='Failed to create authentication manager', original_error=e)
+
+    def is_authenticated(self) -> bool:
+        """Check if the user is currently authenticated.
+        
+        Returns:
+            bool: True if the user has valid credentials, False otherwise
+        """
+        try:
+            # Check if we have a valid access token
+            # TODO: Check expiration date and attempt refresh token auth
+            access_token = self.cache.load_credential('access_token')
+            if access_token and self._validate_token(access_token):
+                return True
+            
+            # Check if we have cached credentials
+            username = self.config.get('username')
+            password = self.cache.load_credential('password')
+            
+            # Consider the user authenticated if both username and password are present
+            return bool(username and password)
+        
+        except Exception:
+            logger.debug("Error checking authentication status", exc_info=True)
+            return False

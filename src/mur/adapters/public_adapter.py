@@ -9,8 +9,10 @@ from requests.exceptions import RequestException
 
 from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactManifest
+from ..core.requests import ApiClient
 from ..utils.constants import DEFAULT_MURMUR_INDEX_URL, MURMUR_SERVER_URL, MURMURRC_PATH
 from ..utils.error_handler import MurError
+from ..utils.models import ArtifactPublishRequest, ArtifactPublishResponse
 from .base_adapter import RegistryAdapter
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ class PublicRegistryAdapter(RegistryAdapter):
         super().__init__(verbose)
         self.base_url = MURMUR_SERVER_URL.rstrip('/')
         self.auth_manager = AuthenticationManager.create(verbose=verbose, base_url=self.base_url)
+        self.api_client = ApiClient(base_url=self.base_url, verbose=verbose)
 
     def publish_artifact(
         self,
@@ -46,18 +49,30 @@ class PublicRegistryAdapter(RegistryAdapter):
         Raises:
             MurError: If connection fails or server returns an error.
         """
-        url = f'{self.base_url}/artifacts'
-
         logger.debug(f'Publishing artifact: {manifest.to_dict()}')
 
         try:
+            # Create request payload from manifest
+            payload = ArtifactPublishRequest.from_manifest(manifest)
+            
+            if self.verbose:
+                logger.debug(f'Publishing payload: {payload.model_dump(exclude_none=True)}')
+            
+            # Get authentication headers
             headers = self._get_headers()
-            response = requests.post(url, headers=headers, json=manifest.to_dict(), timeout=60)
-
-            if not response.ok:
-                self._handle_error_response(response)
-
-            return response.json()
+            
+            # Make API request
+            response = self.api_client.post(
+                endpoint="/artifacts",
+                payload=payload,
+                response_model=ArtifactPublishResponse,
+                headers=headers
+            )
+            
+            if response.status_code != 200:
+                self._handle_error_response(response.status_code, response.error or "Unknown error")
+            
+            return response.raw_data
 
         except RequestException as e:
             if 'Connection refused' in str(e):
@@ -124,32 +139,26 @@ class PublicRegistryAdapter(RegistryAdapter):
         except MurError:
             raise
 
-    def _handle_error_response(self, response: requests.Response) -> None:
+    def _handle_error_response(self, status_code: int, error_message: str) -> None:
         """Handle error responses from the server.
 
         Args:
-            response (requests.Response): Response object from the server.
+            status_code (int): HTTP status code from the response
+            error_message (str): Error message from the response
 
         Raises:
             MurError: With appropriate error code and message based on the response.
         """
-        # Parse error response
-        try:
-            error_data = response.json()
-            detail = error_data.get('detail', '')
-        except json.JSONDecodeError:
-            detail = response.text
-
         # Handle specific error messages
-        if 'Token has expired' in detail:
+        if 'Token has expired' in error_message:
             raise MurError(
                 code=504,
                 message='Token has expired. Please log in again',
                 detail='Please run `mur logout` and try again.',
             )
-        if 'Could not validate credentials' in detail:
+        if 'Could not validate credentials' in error_message:
             raise MurError(502, 'Could not validate credentials')
-        if 'The package or file already exists in the feed' in detail:
+        if 'The package or file already exists in the feed' in error_message:
             raise MurError(302, 'Package with version already exists')
 
         # Map standard HTTP status codes
@@ -164,13 +173,12 @@ class PublicRegistryAdapter(RegistryAdapter):
         }
 
         # Get error code and message, with fallback to generic server error
-        error_code, error_message = STATUS_CODE_MAPPING.get(response.status_code, (800, 'Server error'))
+        error_code, default_message = STATUS_CODE_MAPPING.get(status_code, (800, 'Server error'))
 
         # Use provided detail if available
-        if detail:
-            error_message = detail
+        error_detail = error_message if error_message else default_message
 
-        raise MurError(error_code, error_message)
+        raise MurError(error_code, error_detail)
 
     def get_package_indexes(self) -> list[str]:
         """Get package indexes from .murmurrc configuration.

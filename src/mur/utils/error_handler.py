@@ -102,6 +102,7 @@ class MurError(Exception):
         505: 'Insufficient Permissions',
         506: 'Rate Limit Exceeded',
         507: 'Missing User Data',
+        508: 'Authentication Required',
         # Category 6: Remote Artifact Resolution
         600: 'General Resolution Error',
         601: 'Artifact Not Found',

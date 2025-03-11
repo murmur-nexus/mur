@@ -138,6 +138,10 @@ class PublishCommand(ArtifactCommand):
             Exception: If any step of the publishing process fails
         """
         try:
+            # Check authentication early
+            self._ensure_authenticated()
+            
+            self.manifest = self._load_murmur_yaml_from_artifact()
             # Get primary publish URL from .murmurrc
             index_url, _ = self._get_index_urls_from_murmurrc(MURMURRC_PATH)
 
@@ -177,6 +181,22 @@ class PublishCommand(ArtifactCommand):
 
         except Exception as e:
             self.handle_error(e, f'Failed to publish {self.artifact_type}')
+
+    def _ensure_authenticated(self) -> None:
+        """Ensure the user is authenticated before proceeding.
+        
+        Raises:
+            MurError: If authentication fails
+        """
+        # Get the auth manager from the registry adapter
+        auth_manager = self.registry.auth_manager
+        
+        if not auth_manager.is_authenticated():
+            raise MurError(
+                code=508,
+                message="Authentication Required",
+                detail="You must be logged in to publish artifacts. Run 'mur login' first."
+            )
 
 
 def publish_command() -> click.Command:
