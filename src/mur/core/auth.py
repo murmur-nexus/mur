@@ -2,11 +2,14 @@ import logging
 
 import click
 import requests
+from pydantic import BaseModel
 
 from ..utils.constants import DEFAULT_TIMEOUT, MURMUR_SERVER_URL
 from ..utils.error_handler import MurError
 from .cache import CredentialCache
 from .config import ConfigManager
+from .requests import ApiClient
+from ..utils.models import LoginRequest, LoginResponse, UserConfig
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,8 @@ class AuthenticationManager:
             if verbose:
                 logger.setLevel(logging.DEBUG)
 
+            self.api_client = ApiClient(base_url, verbose)
+
         except MurError:
             raise
         except Exception as e:
@@ -67,13 +72,13 @@ class AuthenticationManager:
         """
         try:
             # Try cached access token
-            if access_token := self.cache.load_access_token():
+            if access_token := self.cache.load_credential('access_token'):
                 if self._validate_token(access_token):
                     logger.debug('Using cached access token')
                     return access_token
 
             # Try using cached credentials
-            if (username := str(self.config.get('username'))) and (password := self.cache.load_password()):
+            if (username := str(self.config.get('username'))) and (password := self.cache.load_credential('password')):
                 if self.verbose:
                     logger.info('Authenticating with cached credentials')
                 if access_token := self._authenticate(username, password):
@@ -118,34 +123,43 @@ class AuthenticationManager:
 
         Returns:
             str | None: Access token if authentication successful, None otherwise
-
+            
         Note:
             On successful authentication, credentials are automatically cached.
+
+        Raises:
+            MurError: If authentication fails due to invalid credentials or server error
         """
         try:
-            url = f'{self.base_url}/auth/login'
-            query_params = {'grant_type': 'password'}
-            payload = {'username': username, 'password': password}
-            headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-
-            verify_ssl = self.base_url.startswith('https://')
-
-            response = requests.post(
-                url, params=query_params, headers=headers, data=payload, timeout=DEFAULT_TIMEOUT, verify=verify_ssl
+            login_payload = LoginRequest(username=username, password=password)
+            
+            response = self.api_client.post(
+                endpoint="/auth/login",
+                payload=login_payload,
+                response_model=LoginResponse,
+                query_params={"grant_type": "password"},
+                content_type="application/x-www-form-urlencoded"
             )
-
-            if response.status_code == 200:
-                data = response.json()
-                logger.debug(f'Access token: {data.get("access_token")}')
-
-                if access_token := data.get('access_token'):
-                    # Get username from response if available, otherwise use input username
-                    username = data.get('user', {}).get('username', username)
-                    self._save_credentials(username, password, access_token)
-                    return username
+            
+            if response.status_code == 200 and response.data:
+                logger.debug(f'Access token: {response.data.access_token}')
+                
+                if not response.data.user:
+                    raise MurError(code=507, message="Missing User Data", detail="Missing user data in response")
+                
+                # User is already a UserConfig object, no need to create a new one
+                self._save_user_session(response.data.user)
+                self._save_credentials(
+                    password, 
+                    response.data.access_token, 
+                    response.data.refresh_token
+                )
+                return response.data.access_token
 
             return None
 
+        except MurError:
+            raise
         except Exception as e:
             logger.debug(f'Error: {e}')
             raise MurError(
@@ -155,14 +169,14 @@ class AuthenticationManager:
                 original_error=e,
             )
 
-    def _save_credentials(self, username: str, password: str, access_token: str) -> None:
-        """Save credentials for future use."""
+    def _save_user_session(self, user: UserConfig) -> None:
+        """Save user session for future use."""
         try:
-            self.cache.save_access_token(access_token)
-
             # Get the current config from the manager and update it
             config = self.config_manager.config
-            config['username'] = username
+            
+            # Since user is already a UserConfig object, we can directly use it
+            config.update(user.model_dump(exclude_none=True))
 
             # Save the updated config
             self.config_manager.save_config()
@@ -170,7 +184,18 @@ class AuthenticationManager:
             # Update our local copy
             self.config = self.config_manager.get_config()
 
-            self.cache.save_password(password)
+            logger.debug('Saved user session')
+        except MurError:
+            raise
+        except Exception as e:
+            raise MurError(code=501, message='Failed to save user session', original_error=e)
+
+    def _save_credentials(self, password: str, access_token: str, refresh_token: str) -> None:
+        """Save credentials for future use."""
+        try:
+            self.cache.save_credential('access_token', access_token)
+            self.cache.save_credential('refresh_token', refresh_token)
+            self.cache.save_credential('password', password)
             logger.debug('Saved credentials')
         except MurError:
             raise
@@ -232,8 +257,9 @@ class AuthenticationManager:
             MurError: If credentials cannot be cleared
         """
         try:
-            self.cache.clear_access_token()
-            self.cache.clear_password()
+            self.cache.clear_credential('access_token'  )
+            self.cache.clear_credential('refresh_token')
+            self.cache.clear_credential('password')
             if 'username' in self.config:
                 self.config_manager.config.pop('username', None)
                 self.config_manager.save_config()
