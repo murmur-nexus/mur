@@ -11,9 +11,9 @@ from mur.core.packaging import ArtifactManifest
 from ..utils.constants import (
     MURMUR_EXTRAS_INDEX_URL,
     MURMUR_INDEX_URL,
-    MURMURRC_PATH,
     PYPI_PASSWORD,
     PYPI_USERNAME,
+    GLOBAL_MURMURRC_PATH,
 )
 from ..utils.error_handler import MurError
 from .base_adapter import RegistryAdapter
@@ -125,8 +125,12 @@ class PrivateRegistryAdapter(RegistryAdapter):
         # If no environment variables, fall back to .murmurrc
         if not index_url:
             try:
+                # Get the path to the .murmurrc file
+                local_murmurrc = Path.cwd() / '.murmurrc'
+                murmurrc_path = local_murmurrc if local_murmurrc.exists() else GLOBAL_MURMURRC_PATH
+                
                 config = configparser.ConfigParser()
-                config.read(MURMURRC_PATH)
+                config.read(murmurrc_path)
 
                 # Get primary index from config
                 index_url = config.get('global', 'index-url', fallback=None)

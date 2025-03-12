@@ -12,7 +12,7 @@ from ..adapters.adapter_factory import get_registry_adapter
 from ..core.auth import AuthenticationManager
 from ..core.config import ConfigManager
 from ..core.packaging import ArtifactManifest, normalize_package_name
-from ..utils.constants import DEFAULT_MURMUR_EXTRA_INDEX_URLS, DEFAULT_MURMUR_INDEX_URL, MURMURRC_PATH
+from ..utils.constants import DEFAULT_MURMUR_EXTRA_INDEX_URLS, DEFAULT_MURMUR_INDEX_URL, MURMURRC_PATH, GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
 
 logger = logging.getLogger(__name__)
@@ -44,16 +44,39 @@ class ArtifactCommand:
         # Initialize yaml and current_dir for config loading
         self.current_dir = self.get_current_dir()
         self.yaml = self._configure_yaml()
-
-        # Only ensure .murmurrc exists for commands that need it
-        # if self.command_name in self.REGISTRY_COMMANDS:
-            # self._ensure_murmurrc_exists() TODO: Remove this
+        
+        # Determine which .murmurrc file to use
+        self.murmurrc_path = self._get_murmurrc_path()
+        
+        # Ensure .murmurrc exists for all commands
+        if not self.murmurrc_path.exists():
+            self._ensure_murmurrc_exists()
+            # TODO Assess to setup public or private registry message
             # self.registry = get_registry_adapter(verbose)
-
+        
         self.config = ConfigManager()
         self.auth_manager = AuthenticationManager.create(verbose)
 
-    def _get_index_urls_from_murmurrc(self, murmurrc_path: str) -> tuple[str, list[str]]:
+    def _get_murmurrc_path(self) -> Path:
+        """Get the path to the .murmurrc file to use.
+        
+        Checks for a local .murmurrc in the current directory first,
+        then falls back to the global one in the user's home directory.
+        
+        Returns:
+            Path: Path to the .murmurrc file to use
+        """
+        local_murmurrc = self.current_dir / '.murmurrc'
+        if local_murmurrc.exists():
+            if self.verbose:
+                logger.info(f"Using local configuration from {local_murmurrc}")
+            return local_murmurrc
+        
+        if self.verbose:
+            logger.info(f"Using global configuration from {GLOBAL_MURMURRC_PATH}")
+        return GLOBAL_MURMURRC_PATH
+
+    def _get_index_urls_from_murmurrc(self, murmurrc_path: str | Path) -> tuple[str, list[str]]:
         """Get index URLs from .murmurrc file.
 
         Args:
@@ -108,7 +131,7 @@ class ArtifactCommand:
         # Create/update .murmurrc
         config['global'] = {'index-url': index_url, 'extra-index-url': '\n'.join(extra_index_list)}
 
-        with open(MURMURRC_PATH, 'w') as f:
+        with open(self.murmurrc_path, 'w') as f:
             config.write(f)
 
     def _ensure_murmur_namespace_in_path(self) -> None:

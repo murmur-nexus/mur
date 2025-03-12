@@ -10,7 +10,7 @@ from ..core.config import ConfigManager
 from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_package_name
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
-from ..utils.constants import MURMURRC_PATH, DEFAULT_MURMUR_INDEX_URL
+from ..utils.constants import DEFAULT_MURMUR_INDEX_URL
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
@@ -481,7 +481,7 @@ class BuildCommand(ArtifactCommand):
         """
         try:
             # Detect private or public registry path
-            index_url, _ = self._get_index_urls_from_murmurrc(MURMURRC_PATH)
+            index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
             if index_url != DEFAULT_MURMUR_INDEX_URL:
                 self.private_registry = True
 

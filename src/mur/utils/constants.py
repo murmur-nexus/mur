@@ -18,4 +18,4 @@ DEFAULT_MURMUR_EXTRA_INDEX_URLS = [
 ]
 PYPI_USERNAME = os.getenv('PYPI_USERNAME', 'admin')  # local defaults
 PYPI_PASSWORD = os.getenv('PYPI_PASSWORD', 'admin')  # local defaults
-MURMURRC_PATH = Path.home() / '.murmurrc'
+GLOBAL_MURMURRC_PATH = Path.home() / '.murmurrc'

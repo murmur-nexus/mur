@@ -6,7 +6,7 @@ import click
 from ..adapters import PrivateRegistryAdapter, PublicRegistryAdapter
 from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactManifest, normalize_package_name
-from ..utils.constants import DEFAULT_MURMUR_INDEX_URL, MURMURRC_PATH
+from ..utils.constants import DEFAULT_MURMUR_INDEX_URL
 from ..utils.error_handler import MurError
 from .base import ArtifactCommand
 
@@ -174,7 +174,7 @@ class PublishCommand(ArtifactCommand):
             print('publish_artifact.py')
             self.manifest = self._load_murmur_yaml_from_artifact()
             # Get primary publish URL from .murmurrc
-            index_url, _ = self._get_index_urls_from_murmurrc(MURMURRC_PATH)
+            index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
             print(f'index_url: {index_url}')
             print(f'DEFAULT_MURMUR_INDEX_URL: {DEFAULT_MURMUR_INDEX_URL}')
             # Create appropriate adapter based on index URL

@@ -10,7 +10,7 @@ from requests.exceptions import RequestException
 from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactManifest
 from ..core.requests import ApiClient
-from ..utils.constants import DEFAULT_MURMUR_INDEX_URL, MURMUR_SERVER_URL, MURMURRC_PATH
+from ..utils.constants import DEFAULT_MURMUR_INDEX_URL, MURMUR_SERVER_URL, GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
 from ..utils.models import ArtifactPublishRequest, ArtifactPublishResponse
 from .base_adapter import RegistryAdapter
@@ -190,9 +190,13 @@ class PublicRegistryAdapter(RegistryAdapter):
             list[str]: List of package index URLs with primary index first.
         """
         try:
+            # Get the path to the .murmurrc file
+            local_murmurrc = Path.cwd() / '.murmurrc'
+            murmurrc_path = local_murmurrc if local_murmurrc.exists() else GLOBAL_MURMURRC_PATH
+            
             # Get index URLs from .murmurrc
             config = configparser.ConfigParser()
-            config.read(MURMURRC_PATH)
+            config.read(murmurrc_path)
 
             # Get primary index from config
             index_url = config.get('global', 'index-url', fallback=DEFAULT_MURMUR_INDEX_URL)
