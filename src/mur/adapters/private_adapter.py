@@ -133,19 +133,19 @@ class PrivateRegistryAdapter(RegistryAdapter):
                 config.read(murmurrc_path)
 
                 # Get primary index from config
-                index_url = config.get('global', 'index-url', fallback=None)
+                index_url = config.get('murmur-nexus', 'index-url', fallback=None)
 
                 # If still no index URL, raise error
                 if not index_url:
                     raise MurError(
                         code=807,
                         message='No private registry URL configured',
-                        detail="Set MURMUR_INDEX_URL environment variable or 'index-url' in .murmurrc [global] section.",
+                        detail="Set MURMUR_INDEX_URL environment variable or 'index-url' in .murmurrc [murmur-nexus] section.",
                     )
 
                 # Get extra indexes from config if no env var extras
-                if not extra_indexes and config.has_option('global', 'extra-index-url'):
-                    extra_urls = config.get('global', 'extra-index-url')
+                if not extra_indexes and config.has_option('murmur-nexus', 'extra-index-url'):
+                    extra_urls = config.get('murmur-nexus', 'extra-index-url')
                     extra_indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
 
             except Exception as e:

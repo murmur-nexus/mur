@@ -199,12 +199,12 @@ class PublicRegistryAdapter(RegistryAdapter):
             config.read(murmurrc_path)
 
             # Get primary index from config
-            index_url = config.get('global', 'index-url', fallback=DEFAULT_MURMUR_INDEX_URL)
+            index_url = config.get('murmur-nexus', 'index-url', fallback=DEFAULT_MURMUR_INDEX_URL)
             indexes = [index_url]
 
             # Add extra index URLs from config if present
-            if config.has_option('global', 'extra-index-url'):
-                extra_urls = config.get('global', 'extra-index-url')
+            if config.has_option('murmur-nexus', 'extra-index-url'):
+                extra_urls = config.get('murmur-nexus', 'extra-index-url')
                 indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
 
             return indexes

@@ -12,7 +12,7 @@ from ..adapters.adapter_factory import get_registry_adapter
 from ..core.auth import AuthenticationManager
 from ..core.config import ConfigManager
 from ..core.packaging import ArtifactManifest, normalize_package_name
-from ..utils.constants import DEFAULT_MURMUR_EXTRA_INDEX_URLS, DEFAULT_MURMUR_INDEX_URL, MURMURRC_PATH, GLOBAL_MURMURRC_PATH
+from ..utils.constants import DEFAULT_MURMUR_EXTRA_INDEX_URLS, DEFAULT_MURMUR_INDEX_URL, GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
 
 logger = logging.getLogger(__name__)
@@ -96,15 +96,15 @@ class ArtifactCommand:
             raise FileNotFoundError(f'{murmurrc_path} not found.')
         config.read(murmurrc_path)
 
-        index_url = config.get('global', 'index-url', fallback=None)
+        index_url = config.get('murmur-nexus', 'index-url', fallback=None)
         if not index_url:
-            raise ValueError("No 'index-url' found in .murmurrc under [global].")
+            raise ValueError("No 'index-url' found in .murmurrc under [murmur-nexus].")
 
         # Get all extra-index-url values
         extra_index_urls: list[str] = []
-        if config.has_option('global', 'extra-index-url'):
+        if config.has_option('murmur-nexus', 'extra-index-url'):
             # Handle both single and multiple extra-index-url entries
-            extra_urls = config.get('global', 'extra-index-url')
+            extra_urls = config.get('murmur-nexus', 'extra-index-url')
             extra_index_urls.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
 
         return index_url, extra_index_urls
@@ -129,7 +129,7 @@ class ArtifactCommand:
             extra_index_list = DEFAULT_MURMUR_EXTRA_INDEX_URLS
 
         # Create/update .murmurrc
-        config['global'] = {'index-url': index_url, 'extra-index-url': '\n'.join(extra_index_list)}
+        config['murmur-nexus'] = {'index-url': index_url, 'extra-index-url': '\n'.join(extra_index_list)}
 
         with open(self.murmurrc_path, 'w') as f:
             config.write(f)
