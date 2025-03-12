@@ -253,20 +253,36 @@ class AuthenticationManager:
 
         Removes all cached credentials including:
         - Access token
+        - Refresh token
         - Password
-        - Username from configuration
-
+        - User data from configuration (id, username, email, etc.)
+        - User accounts from configuration
         Raises:
             MurError: If credentials cannot be cleared
         """
         try:
-            self.cache.clear_credential('access_token'  )
+            # Clear cached tokens and password
+            self.cache.clear_credential('access_token')
             self.cache.clear_credential('refresh_token')
             self.cache.clear_credential('password')
-            if 'username' in self.config:
-                self.config_manager.config.pop('username', None)
-                self.config_manager.save_config()
-            logger.debug('Cleared all credentials')
+            
+            # Clear user data from config using UserConfig model fields
+            user_keys = list(UserConfig.model_fields.keys())
+            
+            for key in user_keys:
+                if key in self.config_manager.config:
+                    self.config_manager.config.pop(key, None)
+
+            # Clear user_accounts from config
+            self.config_manager.config.pop('user_accounts', None)
+            
+            # Save the updated config
+            self.config_manager.save_config()
+            
+            # Update our local copy
+            self.config = self.config_manager.get_config()
+            
+            logger.debug(f'Cleared all credentials and user data fields: {user_keys}')
         except MurError:
             raise
         except Exception as e:

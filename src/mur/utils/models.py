@@ -18,7 +18,6 @@ class UserConfig(BaseModel):
     email: str | None = None
     last_sign_in_at: str | None = None
     created_at: str | None = None
-    updated_at: str | None = None
 
 
 class LoginResponse(BaseModel):
