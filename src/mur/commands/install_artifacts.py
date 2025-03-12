@@ -34,10 +34,6 @@ class InstallArtifactCommand(ArtifactCommand):
         """
         super().__init__('install', verbose)
 
-        # Add auth manager initialization
-        self.auth_manager = AuthenticationManager.create(verbose=verbose)
-        self.username = self.auth_manager.config.get('username')
-
     def _get_murmur_packages_dir(self, artifact_type: str) -> Path:
         """Get the murmur packages directory path.
 

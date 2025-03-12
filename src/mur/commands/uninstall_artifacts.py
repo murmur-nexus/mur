@@ -63,17 +63,6 @@ class UninstallArtifactCommand(ArtifactCommand):
             return artifact_name[len(scope_prefix) :]
         return artifact_name
 
-    def _normalize_artifact_name(self, artifact_name: str) -> str:
-        """Normalize artifact name to snake case.
-
-        Args:
-            artifact_name (str): artifact name to normalize
-
-        Returns:
-            str: Normalized artifact name in snake case
-        """
-        return artifact_name.lower().replace('-', '_').replace('.', '_')
-
     def _get_installed_artifacts(self) -> list[dict[str, str]]:
         """Get list of installed artifacts from pip.
 
@@ -102,12 +91,12 @@ class UninstallArtifactCommand(ArtifactCommand):
         Returns:
             str | None: Actual installed artifact name if found, None otherwise
         """
-        normalized_name = self._normalize_artifact_name(artifact_name)
+        normalized_name = normalize_package_name(artifact_name)
         if self.verbose:
             logger.debug(f'Looking for normalized name: {normalized_name}')
 
         for pkg in artifacts:
-            if self._normalize_artifact_name(pkg['name']) == normalized_name:
+            if normalize_package_name(pkg['name']) == normalized_name:
                 return pkg['name']
         return None
 

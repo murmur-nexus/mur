@@ -76,7 +76,8 @@ def login(verbose: bool) -> None:
     """
     try:
         auth_manager = AuthenticationManager.create(verbose)
-        username = auth_manager.authenticate()
+        auth_manager.authenticate()
+        username = auth_manager.config.get('username')
         click.echo(f'Login successful for {username}')
     except MurError as e:
         e.handle()

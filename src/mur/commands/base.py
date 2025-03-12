@@ -46,9 +46,9 @@ class ArtifactCommand:
         self.yaml = self._configure_yaml()
 
         # Only ensure .murmurrc exists for commands that need it
-        if self.command_name in self.REGISTRY_COMMANDS:
-            self._ensure_murmurrc_exists()
-            self.registry = get_registry_adapter(verbose)
+        # if self.command_name in self.REGISTRY_COMMANDS:
+            # self._ensure_murmurrc_exists() TODO: Remove this
+            # self.registry = get_registry_adapter(verbose)
 
         self.config = ConfigManager()
         self.auth_manager = AuthenticationManager.create(verbose)

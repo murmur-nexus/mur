@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Optional, Type, TypeVar, Generic
+from typing import Any, Dict, Optional, Type, TypeVar, Generic, Union, List
 
 import requests
 from pydantic import BaseModel
@@ -9,7 +9,7 @@ from ..utils.error_handler import MurError
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T', bound=BaseModel)
+T = TypeVar('T', bound=Any)  # Changed from BaseModel to Any to support List[Model]
 
 
 class ApiResponse(BaseModel, Generic[T]):
@@ -19,7 +19,7 @@ class ApiResponse(BaseModel, Generic[T]):
     """
     status_code: int
     data: Optional[T] = None
-    raw_data: Dict[str, Any] = {}
+    raw_data: Union[Dict[str, Any], List[Dict[str, Any]]] = {}  # Updated to accept both dict and list
     error: Optional[str] = None
 
 
@@ -50,6 +50,152 @@ class ApiClient:
         if verbose:
             logger.setLevel(logging.DEBUG)
     
+    def request(
+        self,
+        method: str,
+        endpoint: str,
+        payload: Optional[BaseModel] = None,
+        response_model: Optional[Type[T]] = None,
+        query_params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        content_type: str = 'application/json'
+    ) -> ApiResponse[T]:
+        """Make an HTTP request to the API.
+        
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE, etc.)
+            endpoint: API endpoint path (without base URL)
+            payload: Optional request payload as a Pydantic model
+            response_model: Expected response data model
+            query_params: Optional query parameters
+            headers: Optional request headers
+            content_type: Content type for the request
+            
+        Returns:
+            ApiResponse: Standardized response with typed data
+            
+        Raises:
+            MurError: If the API request fails
+        """
+        try:
+            url = f'{self.base_url}/{endpoint.lstrip("/")}'
+            
+            # Default headers
+            request_headers = {'Content-Type': content_type}
+            if headers:
+                request_headers.update(headers)
+                
+            verify_ssl = self.base_url.startswith('https://')
+            
+            # Handle different content types and prepare request data
+            data = None
+            json_data = None
+            
+            if payload:
+                payload_dict = payload.model_dump(exclude_none=True)
+                if content_type == 'application/json':
+                    json_data = payload_dict
+                else:
+                    data = payload_dict
+            
+            if self.verbose:
+                logger.debug(f"{method.upper()} request to {endpoint}")
+            
+            response = requests.request(
+                method=method.lower(),
+                url=url, 
+                params=query_params, 
+                headers=request_headers, 
+                data=data,
+                json=json_data,
+                timeout=DEFAULT_TIMEOUT, 
+                verify=verify_ssl
+            )
+            
+            if self.verbose:
+                logger.debug(f"{method.upper()} {endpoint} response status: {response.status_code}")
+            
+            # Parse response
+            if response.status_code == 200 and response_model and response.content:
+                try:
+                    response_json = response.json()
+                    
+                    # Handle both list and dictionary responses
+                    if isinstance(response_json, list):
+                        # For List[SomeModel] response types
+                        if hasattr(response_model, "__origin__") and response_model.__origin__ is list:
+                            item_model = response_model.__args__[0]
+                            parsed_data = [item_model(**item) for item in response_json]
+                            return ApiResponse(
+                                status_code=response.status_code,
+                                data=parsed_data,
+                                raw_data=response_json,  # Now ApiResponse accepts list
+                                error=None
+                            )
+                        else:
+                            logger.debug(f"Expected a list model but got {response_model}")
+                            return ApiResponse(
+                                status_code=response.status_code,
+                                raw_data=response_json,
+                                error="Response is a list but model is not List[T]"
+                            )
+                    else:
+                        # For regular model responses (dictionaries)
+                        parsed_data = response_model(**response_json)
+                        return ApiResponse(
+                            status_code=response.status_code,
+                            data=parsed_data,
+                            raw_data=response_json,
+                            error=None
+                        )
+                except Exception as e:
+                    logger.debug(f"Failed to parse response data: {e}")
+                    return ApiResponse(
+                        status_code=response.status_code,
+                        raw_data={} if isinstance(response.json(), list) else response.json() if response.content else {},
+                        error=f"Failed to parse response: {str(e)}"
+                    )
+            
+            # Handle non-200 responses or responses without content
+            try:
+                if response.content:
+                    response_data = response.json()
+                    # Check if response_data is a list or dict and handle accordingly
+                    if isinstance(response_data, list):
+                        return ApiResponse(
+                            status_code=response.status_code,
+                            raw_data=response_data,
+                            error=response.text if response.status_code >= 400 else None
+                        )
+                    else:
+                        return ApiResponse(
+                            status_code=response.status_code,
+                            raw_data=response_data,
+                            error=response.text if response.status_code >= 400 else None
+                        )
+                else:
+                    return ApiResponse(
+                        status_code=response.status_code,
+                        raw_data={},
+                        error=response.text if response.status_code >= 400 else None
+                    )
+            except Exception:
+                # If JSON parsing fails, return empty raw_data
+                return ApiResponse(
+                    status_code=response.status_code,
+                    raw_data={},
+                    error=response.text if response.status_code >= 400 else None
+                )
+            
+        except Exception as e:
+            logger.debug(f"API request error: {e}")
+            raise MurError(
+                code=600,
+                message=f"API request to {endpoint} failed",
+                detail="Failed to communicate with server",
+                original_error=e,
+            )
+    
     def post(
         self, 
         endpoint: str, 
@@ -75,71 +221,140 @@ class ApiClient:
         Raises:
             MurError: If the API request fails
         """
-        try:
-            url = f'{self.base_url}/{endpoint.lstrip("/")}'
+        return self.request(
+            method='post',
+            endpoint=endpoint,
+            payload=payload,
+            response_model=response_model,
+            query_params=query_params,
+            headers=headers,
+            content_type=content_type
+        )
+    
+    def get(
+        self, 
+        endpoint: str, 
+        response_model: Type[T],
+        query_params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None
+    ) -> ApiResponse[T]:
+        """Make a GET request to the API.
+        
+        Args:
+            endpoint: API endpoint path (without base URL)
+            response_model: Expected response data model
+            query_params: Optional query parameters
+            headers: Optional request headers
             
-            # Default headers
-            request_headers = {'Content-Type': content_type}
-            if headers:
-                request_headers.update(headers)
-                
-            verify_ssl = self.base_url.startswith('https://')
+        Returns:
+            ApiResponse: Standardized response with typed data
             
-            # Handle different content types
-            if content_type == 'application/json':
-                data = None
-                json_data = payload.model_dump(exclude_none=True)
-            elif content_type == 'application/x-www-form-urlencoded':
-                data = payload.model_dump(exclude_none=True)
-                json_data = None
-            else:
-                data = payload.model_dump(exclude_none=True)
-                json_data = None
+        Raises:
+            MurError: If the API request fails
+        """
+        return self.request(
+            method='get',
+            endpoint=endpoint,
+            response_model=response_model,
+            query_params=query_params,
+            headers=headers
+        )
+    
+    def put(
+        self, 
+        endpoint: str, 
+        payload: BaseModel,
+        response_model: Type[T],
+        query_params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        content_type: str = 'application/json'
+    ) -> ApiResponse[T]:
+        """Make a PUT request to the API.
+        
+        Args:
+            endpoint: API endpoint path (without base URL)
+            payload: Request payload as a Pydantic model
+            response_model: Expected response data model
+            query_params: Optional query parameters
+            headers: Optional request headers
+            content_type: Content type for the request
             
-            response = requests.post(
-                url, 
-                params=query_params, 
-                headers=request_headers, 
-                data=data,
-                json=json_data,
-                timeout=DEFAULT_TIMEOUT, 
-                verify=verify_ssl
-            )
+        Returns:
+            ApiResponse: Standardized response with typed data
             
-            if self.verbose:
-                logger.debug(f"POST {endpoint} response status: {response.status_code}")
+        Raises:
+            MurError: If the API request fails
+        """
+        return self.request(
+            method='put',
+            endpoint=endpoint,
+            payload=payload,
+            response_model=response_model,
+            query_params=query_params,
+            headers=headers,
+            content_type=content_type
+        )
+    
+    def delete(
+        self, 
+        endpoint: str, 
+        response_model: Optional[Type[T]] = None,
+        query_params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None
+    ) -> ApiResponse[T]:
+        """Make a DELETE request to the API.
+        
+        Args:
+            endpoint: API endpoint path (without base URL)
+            response_model: Expected response data model (optional)
+            query_params: Optional query parameters
+            headers: Optional request headers
             
-            # Parse response
-            response_data = {}
-            if response.status_code == 200:
-                try:
-                    response_data = response.json()
-                    parsed_data = response_model(**response_data)
-                    return ApiResponse(
-                        status_code=response.status_code,
-                        data=parsed_data,
-                        raw_data=response_data,
-                        error=None
-                    )
-                except Exception as e:
-                    logger.debug(f"Failed to parse response data: {e}")
-                    return ApiResponse(
-                        status_code=response.status_code,
-                        raw_data=response_data,
-                        error=f"Failed to parse response: {str(e)}"
-                    )
+        Returns:
+            ApiResponse: Standardized response with typed data
             
-            return ApiResponse(
-                status_code=response.status_code,
-                raw_data=response.json() if response.content else {},
-                error=response.text
-            )
+        Raises:
+            MurError: If the API request fails
+        """
+        return self.request(
+            method='delete',
+            endpoint=endpoint,
+            response_model=response_model,
+            query_params=query_params,
+            headers=headers
+        )
+    
+    def patch(
+        self, 
+        endpoint: str, 
+        payload: BaseModel,
+        response_model: Type[T],
+        query_params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        content_type: str = 'application/json'
+    ) -> ApiResponse[T]:
+        """Make a PATCH request to the API.
+        
+        Args:
+            endpoint: API endpoint path (without base URL)
+            payload: Request payload as a Pydantic model
+            response_model: Expected response data model
+            query_params: Optional query parameters
+            headers: Optional request headers
+            content_type: Content type for the request
             
-        except Exception as e:
-            logger.debug(f"API request error: {e}")
-            raise MurError(
-                code=501,
-                message=f"API request to {endpoint} failed",
-                detail="Failed to communicate with server",
-                original_error=e,
-            )
+        Returns:
+            ApiResponse: Standardized response with typed data
+            
+        Raises:
+            MurError: If the API request fails
+        """
+        return self.request(
+            method='patch',
+            endpoint=endpoint,
+            payload=payload,
+            response_model=response_model,
+            query_params=query_params,
+            headers=headers,
+            content_type=content_type
+        )

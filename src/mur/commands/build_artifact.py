@@ -6,9 +6,11 @@ import click
 from ruamel.yaml import YAML
 
 from ..core.auth import AuthenticationManager
+from ..core.config import ConfigManager
 from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_package_name
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
+from ..utils.constants import MURMURRC_PATH, DEFAULT_MURMUR_INDEX_URL
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
@@ -38,57 +40,89 @@ class BuildCommand(ArtifactCommand):
             verbose: Whether to enable verbose output
 
         Raises:
-            MurError: If manifest validation fails
+            MurError: If initialization fails
         """
         try:
             super().__init__('build', verbose)
-
-            # Add auth manager initialization
-            self.auth_manager = AuthenticationManager.create(verbose=verbose)
-            self.username = self.auth_manager.config.get('username')
-            if not self.username:
-                raise MurError(
-                    code=401, message='No authenticated user found', detail="Please login first using 'mur login'"
-                )
-
+            self.verbose = verbose
+            self.current_dir = self.get_current_dir()
+            self.yaml = self._configure_yaml()
+            self.scope = None
+            self.private_registry = False
+            
             # Load and validate manifest
-            try:
-                self.build_manifest = self._load_murmur_yaml_from_artifact()
-                self.artifact_type = self.build_manifest.type
-                self.build_manifest = self.build_manifest._metadata
-            except MurError as e:
-                e.handle()
-
-            if self.artifact_type not in ['agent', 'tool']:
-                raise MurError(
-                    code=207,
-                    message=f"Invalid artifact type '{self.artifact_type}'",
-                    detail="The artifact type in murmur.yaml must be either 'agent' or 'tool'.",
-                    debug_messages=[f'Found artifact_type: {self.artifact_type}'],
-                )
-
+            self.build_manifest = self._load_build_manifest()
+            self.artifact_type = self._validate_artifact_type(self.build_manifest.get('type'))
+            
+            # Re-initialize parent with correct artifact type
+            super().__init__(self.artifact_type, verbose)
+            
+            self.dist_dir = None
+            self.package_files = None
         except Exception as e:
             if not isinstance(e, MurError):
                 raise MurError(code=207, message=str(e), original_error=e)
             raise
 
-        self.verbose = verbose
-        self.current_dir = self.get_current_dir()
-        self.yaml = self._configure_yaml()
+    def _set_scope_from_accounts(self) -> None:
+        """Set scope from user accounts.
+        
+        Loads user accounts from config and prompts user to select one if multiple exist.
+        
+        Raises:
+            MurError: If no user accounts are found or if loading fails
+        """
+        try:
+            config_manager = ConfigManager()
+            config = config_manager.get_config()
+            user_accounts = config.get("user_accounts", [])
+            
+            if not user_accounts:
+                raise MurError(
+                    code=507,
+                    message="No user accounts found",
+                    detail="At least one user account is required. Please create an account first."
+                )
+                
+            # Prompt user to select account if multiple exist
+            if len(user_accounts) > 1:
+                self.scope = click.prompt(
+                    "Select account",
+                    type=click.Choice(user_accounts),
+                    show_choices=True
+                )
+            else:
+                self.scope = user_accounts[0]
+        except Exception as e:
+            if not isinstance(e, MurError):
+                raise MurError(
+                    code=507,
+                    message="Failed to get user accounts",
+                    detail="Could not retrieve user accounts from configuration",
+                    original_error=e
+                )
+            raise
 
-        # Load config and determine artifact type
-        self.build_manifest = self._load_build_manifest()
-        self.artifact_type = self.build_manifest.get('type')
-        if self.artifact_type not in ['agent', 'tool']:
+    def _validate_artifact_type(self, artifact_type: str) -> str:
+        """Validate the artifact type.
+        
+        Args:
+            artifact_type: The artifact type to validate
+            
+        Returns:
+            The validated artifact type
+            
+        Raises:
+            MurError: If the artifact type is invalid
+        """
+        if artifact_type not in ['agent', 'tool']:
             raise MurError(
                 code=207,
-                message=f"Invalid artifact type '{self.artifact_type}'",
+                message=f"Invalid artifact type '{artifact_type}'",
                 detail="The artifact type in murmur-build.yaml must be either 'agent' or 'tool'.",
-                debug_messages=[f'Found artifact_type: {self.artifact_type}'],
+                debug_messages=[f'Found artifact_type: {artifact_type}'],
             )
-        super().__init__(self.artifact_type, verbose)
-        self.dist_dir = None
-        self.package_files = None
+        return artifact_type
 
     def _configure_yaml(self) -> YAML:
         """Configure YAML parser settings.
@@ -247,9 +281,17 @@ class BuildCommand(ArtifactCommand):
             list[str]: Lines for the project section of pyproject.toml, including
                 name, version, description, and other metadata.
         """
+        if not self.private_registry and not self.scope:
+            raise MurError(
+                code=507,
+                message="No scope set",
+                detail="A scope is required for publishing to the public registry. Please run 'mur login' first."
+            )
+        prefix = f'{self.scope}-' if not self.private_registry else ''
+        artifact_name = f'{prefix}{self.build_manifest["name"]}'.lower()
         content = [
             '[project]',
-            f'name = "{self.username}.{self.build_manifest["name"].lower()}"',
+            f'name = "{artifact_name}"',
             f'version = "{self.build_manifest["version"]}"',
         ]
 
@@ -438,6 +480,15 @@ class BuildCommand(ArtifactCommand):
             MurError: If build process fails at any stage.
         """
         try:
+            # Detect private or public registry path
+            index_url, _ = self._get_index_urls_from_murmurrc(MURMURRC_PATH)
+            if index_url != DEFAULT_MURMUR_INDEX_URL:
+                self.private_registry = True
+
+            if not self.private_registry:
+                self._ensure_authenticated()
+                self._set_scope_from_accounts()
+
             # Validate the artifact name and version
             is_valid_artifact_name_version(self.build_manifest['name'], self.build_manifest['version'])
 
@@ -474,6 +525,22 @@ class BuildCommand(ArtifactCommand):
 
         except MurError as e:
             e.handle()
+
+    def _ensure_authenticated(self) -> None:
+        """Ensure the user is authenticated before proceeding.
+        
+        Raises:
+            MurError: If authentication fails
+        """
+        # Get the auth manager from the registry adapter
+        auth_manager = AuthenticationManager.create(verbose=self.verbose)
+        
+        if not auth_manager.is_authenticated():
+            raise MurError(
+                code=508,
+                message="Authentication Required",
+                detail="You must be logged in to publish artifacts. Run 'mur login' first."
+            )
 
 
 def build_command() -> click.Command:

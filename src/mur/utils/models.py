@@ -90,3 +90,14 @@ class ArtifactPublishResponse(BaseModel):
     normalized_name: str
     version: str
     signed_upload_urls: List[SignedUrlInfo]
+
+
+class Account(BaseModel):
+    """Model representing a user account."""
+    id: str
+    updated_at: str 
+    created_at: str
+    name: str
+
+# Update this model to be a list type alias instead of a wrapper
+AccountListResponse = List[Account]
