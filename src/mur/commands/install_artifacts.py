@@ -11,7 +11,6 @@ from requests.exceptions import ConnectionError as RequestsConnectionError, Requ
 import importlib.metadata
 
 from ..core.auth import AuthenticationManager
-from ..utils.constants import MURMUR_EXTRAS_INDEX_URL, MURMUR_INDEX_URL
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
 from .base import ArtifactCommand
@@ -76,12 +75,6 @@ class InstallArtifactCommand(ArtifactCommand):
                 return
 
             index_url, extra_index_urls = self._get_index_urls_from_murmurrc(self.murmurrc_path)
-
-            if index_url == MURMUR_INDEX_URL:
-                index_url = MURMUR_INDEX_URL
-
-            if MURMUR_EXTRAS_INDEX_URL:
-                extra_index_urls = [url.strip() for url in MURMUR_EXTRAS_INDEX_URL.split(',')]
 
             with Spinner() as spinner:
                 if not self.verbose:

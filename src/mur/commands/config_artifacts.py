@@ -6,11 +6,12 @@ from typing import Optional
 import click
 
 from ..utils.error_handler import MurError
-from ..utils.constants import GLOBAL_MURMURRC_PATH
+from ..utils.constants import GLOBAL_MURMURRC_PATH, DEFAULT_MURMUR_INDEX_URL, DEFAULT_MURMUR_EXTRA_INDEX_URLS
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
 
+MAIN_CONFIG_SECTION = 'murmur-nexus'
 
 class ConfigCommand(ArtifactCommand):
     """Manages Murmur configuration settings.
@@ -23,19 +24,19 @@ class ConfigCommand(ArtifactCommand):
     def __init__(self, verbose: bool = False) -> None:
         """Initialize config command.
 
-        Override parent to prevent automatic .murmurrc creation.
+        Override parent to prevent automatic .murmurrc creation. Initializes paths
+        to both global and local configuration files.
 
         Args:
-            verbose: Whether to enable verbose output
+            verbose (bool): Whether to enable verbose output. Defaults to False.
+
+        Attributes:
+            global_config_path (Path): Path to global .murmurrc file
+            local_config_path (Path): Path to local .murmurrc in current directory
         """
-        # Skip ArtifactCommand's auto-creation of .murmurrc
-        self.command_name = 'config'
-        self.verbose = verbose
-        self._ensure_murmur_namespace_in_path()
+        super().__init__('config', verbose) 
         
-        # Initialize paths without creating files
-        self.current_dir = self.get_current_dir()
-        self.yaml = self._configure_yaml()
+        # Initialize path
         self.global_config_path = GLOBAL_MURMURRC_PATH
         self.local_config_path = Path.cwd() / '.murmurrc'
 
@@ -51,8 +52,8 @@ class ConfigCommand(ArtifactCommand):
         config = configparser.ConfigParser()
         if path.exists():
             config.read(path)
-        if 'murmur-nexus' not in config:
-            config['murmur-nexus'] = {}
+        if MAIN_CONFIG_SECTION not in config:
+            config[MAIN_CONFIG_SECTION] = {}
         return config
 
     def set_config(self, key: str, value: str, use_global: bool = False) -> None:
@@ -77,7 +78,7 @@ class ConfigCommand(ArtifactCommand):
             
             config_path.parent.mkdir(parents=True, exist_ok=True)
             config = self._load_config(config_path)
-            config['murmur-nexus'][key] = value
+            config[MAIN_CONFIG_SECTION][key] = value
             
             with open(config_path, 'w') as f:
                 config.write(f)
@@ -106,16 +107,16 @@ class ConfigCommand(ArtifactCommand):
             # Check local first if it exists
             if self.local_config_path.exists():
                 local_config = self._load_config(self.local_config_path)
-                if key in local_config['murmur-nexus']:
-                    value = local_config['murmur-nexus'][key]
+                if key in local_config[MAIN_CONFIG_SECTION]:
+                    value = local_config[MAIN_CONFIG_SECTION][key]
                     click.echo(f"{key}: {value} (local)")
                     return value
 
             # Fall back to global
             if self.global_config_path.exists():
                 global_config = self._load_config(self.global_config_path)
-                if key in global_config['murmur-nexus']:
-                    value = global_config['murmur-nexus'][key]
+                if key in global_config[MAIN_CONFIG_SECTION]:
+                    value = global_config[MAIN_CONFIG_SECTION][key]
                     click.echo(f"{key}: {value} (global)")
                     return value
 
@@ -141,20 +142,20 @@ class ConfigCommand(ArtifactCommand):
             local_config = self._load_config(self.local_config_path)
 
             # Display global settings
-            if global_config['murmur-nexus']:
+            if global_config[MAIN_CONFIG_SECTION]:
                 click.echo("\nGlobal settings (.murmurrc):")
                 click.echo(f"Path: {self.global_config_path}")
-                for key, value in global_config['murmur-nexus'].items():
+                for key, value in global_config[MAIN_CONFIG_SECTION].items():
                     click.echo(f"{key}: {value}")
 
             # Display local settings
-            if local_config['murmur-nexus']:
+            if local_config[MAIN_CONFIG_SECTION]:
                 click.echo("\nLocal settings (.murmurrc):")
                 click.echo(f"Path: {self.local_config_path}")
-                for key, value in local_config['murmur-nexus'].items():
+                for key, value in local_config[MAIN_CONFIG_SECTION].items():
                     click.echo(f"{key}: {value}")
 
-            if not (global_config['murmur-nexus'] or local_config['murmur-nexus']):
+            if not (global_config[MAIN_CONFIG_SECTION] or local_config[MAIN_CONFIG_SECTION]):
                 click.echo("No configuration values found")
 
         except Exception as e:
@@ -182,8 +183,8 @@ class ConfigCommand(ArtifactCommand):
 
             if config_path.exists():
                 config = self._load_config(config_path)
-                if key in config['murmur-nexus']:
-                    del config['murmur-nexus'][key]
+                if key in config[MAIN_CONFIG_SECTION]:
+                    del config[MAIN_CONFIG_SECTION][key]
                     with open(config_path, 'w') as f:
                         config.write(f)
                     self.log_success(f"Removed {key} from {scope} .murmurrc")
@@ -228,9 +229,9 @@ class ConfigCommand(ArtifactCommand):
 
             # Create new config with default settings
             config = configparser.ConfigParser()
-            config['murmur-nexus'] = {
-                'index-url': 'https://artifacts.murmur.nexus/simple',
-                'extra-index-url': 'https://pypi.org/simple'
+            config[MAIN_CONFIG_SECTION] = {
+                'index-url': DEFAULT_MURMUR_INDEX_URL,
+                'extra-index-url': ' '.join(DEFAULT_MURMUR_EXTRA_INDEX_URLS)
             }
 
             with open(config_path, 'w') as f:

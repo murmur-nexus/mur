@@ -9,7 +9,6 @@ from twine.settings import Settings
 from mur.core.packaging import ArtifactManifest
 
 from ..utils.constants import (
-    MURMUR_EXTRAS_INDEX_URL,
     MURMUR_INDEX_URL,
     PYPI_PASSWORD,
     PYPI_USERNAME,
@@ -104,10 +103,10 @@ class PrivateRegistryAdapter(RegistryAdapter):
             raise MurError(200, f'Upload failed: {e!s}')
 
     def get_package_indexes(self) -> list[str]:
-        """Get package indexes, prioritizing environment variables over .murmurrc config.
+        """Get package indexes from .murmurrc configuration file.
 
-        The method first checks environment variables (MURMUR_INDEX_URL and MURMUR_EXTRAS_INDEX_URL)
-        for package index URLs. If not found, falls back to reading from .murmurrc configuration file.
+        Reads package index URLs from the .murmurrc configuration file, looking first
+        for a local file in the current directory, then falling back to the global config.
 
         Returns:
             list[str]: List of package index URLs with primary index first.
@@ -115,50 +114,42 @@ class PrivateRegistryAdapter(RegistryAdapter):
         Raises:
             MurError: If no private registry URL is configured (807) or if reading configuration fails.
         """
-        # Get URLs from environment variables
-        index_url = MURMUR_INDEX_URL
-        extra_indexes = []
+        try:
+            # Get the path to the .murmurrc file
+            local_murmurrc = Path.cwd() / '.murmurrc'
+            murmurrc_path = local_murmurrc if local_murmurrc.exists() else GLOBAL_MURMURRC_PATH
+            
+            config = configparser.ConfigParser()
+            config.read(murmurrc_path)
 
-        if MURMUR_EXTRAS_INDEX_URL:
-            extra_indexes = [url.strip() for url in MURMUR_EXTRAS_INDEX_URL.split(',')]
+            # Get primary index from config
+            index_url = config.get('murmur-nexus', 'index-url', fallback=None)
 
-        # If no environment variables, fall back to .murmurrc
-        if not index_url:
-            try:
-                # Get the path to the .murmurrc file
-                local_murmurrc = Path.cwd() / '.murmurrc'
-                murmurrc_path = local_murmurrc if local_murmurrc.exists() else GLOBAL_MURMURRC_PATH
-                
-                config = configparser.ConfigParser()
-                config.read(murmurrc_path)
-
-                # Get primary index from config
-                index_url = config.get('murmur-nexus', 'index-url', fallback=None)
-
-                # If still no index URL, raise error
-                if not index_url:
-                    raise MurError(
-                        code=807,
-                        message='No private registry URL configured',
-                        detail="Set MURMUR_INDEX_URL environment variable or 'index-url' in .murmurrc [murmur-nexus] section.",
-                    )
-
-                # Get extra indexes from config if no env var extras
-                if not extra_indexes and config.has_option('murmur-nexus', 'extra-index-url'):
-                    extra_urls = config.get('murmur-nexus', 'extra-index-url')
-                    extra_indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
-
-            except Exception as e:
-                if isinstance(e, MurError):
-                    raise
-                logger.warning(f'Failed to read .murmurrc config: {e}')
+            # If no index URL, raise error
+            if not index_url:
                 raise MurError(
                     code=807,
-                    message='Failed to get private registry configuration',
-                    detail='Ensure either MURMUR_INDEX_URL environment variable is set or .murmurrc is properly configured.',
+                    message='No private registry URL configured',
+                    detail="Set 'index-url' in .murmurrc [murmur-nexus] section.",
                 )
 
-        indexes = [index_url]
-        indexes.extend(extra_indexes)
+            # Get extra indexes from config
+            extra_indexes = []
+            if config.has_option('murmur-nexus', 'extra-index-url'):
+                extra_urls = config.get('murmur-nexus', 'extra-index-url')
+                extra_indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
 
-        return indexes
+            indexes = [index_url]
+            indexes.extend(extra_indexes)
+
+            return indexes
+
+        except Exception as e:
+            if isinstance(e, MurError):
+                raise
+            logger.warning(f'Failed to read .murmurrc config: {e}')
+            raise MurError(
+                code=807,
+                message='Failed to get private registry configuration',
+                detail='Ensure .murmurrc is properly configured with [murmur-nexus] section and index-url.',
+            )

@@ -14,7 +14,7 @@ from ..core.config import ConfigManager
 from ..core.packaging import ArtifactManifest, normalize_package_name
 from ..utils.constants import DEFAULT_MURMUR_EXTRA_INDEX_URLS, DEFAULT_MURMUR_INDEX_URL, GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
-
+from ..adapters.private_adapter import PrivateRegistryAdapter
 logger = logging.getLogger(__name__)
 
 
@@ -39,23 +39,22 @@ class ArtifactCommand:
         """
         self.command_name = command_name
         self.verbose = verbose
-        self._ensure_murmur_namespace_in_path()
 
         # Initialize yaml and current_dir for config loading
         self.current_dir = self.get_current_dir()
         self.yaml = self._configure_yaml()
         
-        # Determine which .murmurrc file to use
+        # Store the murmurrc path
         self.murmurrc_path = self._get_murmurrc_path()
         
-        # Ensure .murmurrc exists for all commands
-        if not self.murmurrc_path.exists():
-            self._ensure_murmurrc_exists()
-            # TODO Assess to setup public or private registry message
-            # self.registry = get_registry_adapter(verbose)
+        # Get the appropriate registry adapter
+        self.registry_adapter = get_registry_adapter(self.murmurrc_path, self.verbose)
+        
+        # Determine based on the adapter type
+        self.private_registry = isinstance(self.registry_adapter, PrivateRegistryAdapter)
         
         self.config = ConfigManager()
-        self.auth_manager = AuthenticationManager.create(verbose)
+        self.auth_manager = AuthenticationManager.create(self.verbose)
 
     def _get_murmurrc_path(self) -> Path:
         """Get the path to the .murmurrc file to use.
@@ -63,10 +62,15 @@ class ArtifactCommand:
         Checks for a local .murmurrc in the current directory first,
         then falls back to the global one in the user's home directory.
         
+        Args:
+            verbose: Whether to enable verbose logging
+        
         Returns:
             Path: Path to the .murmurrc file to use
         """
-        local_murmurrc = self.current_dir / '.murmurrc'
+        current_dir = Path.cwd()
+        local_murmurrc = current_dir / '.murmurrc'
+        
         if local_murmurrc.exists():
             if self.verbose:
                 logger.info(f"Using local configuration from {local_murmurrc}")
@@ -74,7 +78,46 @@ class ArtifactCommand:
         
         if self.verbose:
             logger.info(f"Using global configuration from {GLOBAL_MURMURRC_PATH}")
+
+        if not GLOBAL_MURMURRC_PATH.exists():
+            if self.verbose:
+                logger.info("Global .murmurrc not found, you must be new around here!")
+                logger.info("Running 'mur config init --global' with default settings")
+            self._init_default_global_murmurrc()
+
         return GLOBAL_MURMURRC_PATH
+
+    def _init_default_global_murmurrc(self) -> None:
+        """Initialize a default global .murmurrc file.
+        
+        This method is used to create a default configuration when none exists.
+        It's a simplified version of ConfigCommand.init_config to avoid circular imports.
+        """
+        try:
+            config_path = GLOBAL_MURMURRC_PATH
+            
+            # Create parent directories if they don't exist
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Create new config with default settings
+            config = configparser.ConfigParser()
+            config['murmur-nexus'] = {
+                'index-url': DEFAULT_MURMUR_INDEX_URL,
+                'extra-index-url': ' '.join(DEFAULT_MURMUR_EXTRA_INDEX_URLS)
+            }
+
+            with open(config_path, 'w') as f:
+                config.write(f)
+                
+            if self.verbose:
+                logger.info(f"Created global .murmurrc at: {config_path}")
+
+        except Exception as e:
+            raise MurError(
+                code=405,
+                message="Failed to create global .murmurrc",
+                original_error=e
+            )
 
     def _get_index_urls_from_murmurrc(self, murmurrc_path: str | Path) -> tuple[str, list[str]]:
         """Get index URLs from .murmurrc file.
@@ -108,44 +151,6 @@ class ArtifactCommand:
             extra_index_urls.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
 
         return index_url, extra_index_urls
-
-    def _ensure_murmurrc_exists(self) -> None:
-        """Create or update .murmurrc with index URLs from environment or defaults.
-
-        Creates a new .murmurrc file if it doesn't exist, or updates the existing one.
-        Uses environment variables MURMUR_INDEX_URL and MURMUR_EXTRA_INDEXES if available,
-        otherwise falls back to default values.
-        """
-        config = configparser.ConfigParser()
-
-        # Get primary index URL
-        index_url = os.getenv('MURMUR_INDEX_URL', DEFAULT_MURMUR_INDEX_URL)
-
-        # Get extra indexes
-        extra_indexes = os.getenv('MURMUR_EXTRA_INDEXES')
-        if extra_indexes:
-            extra_index_list = [url.strip() for url in extra_indexes.split(',')]
-        else:
-            extra_index_list = DEFAULT_MURMUR_EXTRA_INDEX_URLS
-
-        # Create/update .murmurrc
-        config['murmur-nexus'] = {'index-url': index_url, 'extra-index-url': '\n'.join(extra_index_list)}
-
-        with open(self.murmurrc_path, 'w') as f:
-            config.write(f)
-
-    def _ensure_murmur_namespace_in_path(self) -> None:
-        """Ensure murmur packages directory is in Python path.
-
-        Adds the .murmur_packages directory from the user's home directory to sys.path
-        if it's not already present.
-        """
-        namespace_dir = Path.home() / '.murmur_packages'
-        namespace_dir_str = str(namespace_dir)
-
-        if namespace_dir_str not in sys.path:
-            sys.path.append(namespace_dir_str)
-            logger.debug(f'Updated sys.path: {sys.path}')
 
     def get_current_dir(self) -> Path:
         """Get current working directory.
