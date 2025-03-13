@@ -29,8 +29,6 @@ class BuildCommand(ArtifactCommand):
         build_manifest (dict): The loaded build manifest configuration.
         artifact_type (str): Type of artifact ('agent' or 'tool').
         config (dict): The build configuration (alias for build_manifest).
-        dist_dir (Path): Directory containing the built files.
-        package_files (list[str]): List of built package filenames.
     """
 
     def __init__(self, verbose: bool = False) -> None:
@@ -45,15 +43,16 @@ class BuildCommand(ArtifactCommand):
         try:
             super().__init__('build', verbose)
             self.verbose = verbose
-            self.current_dir = self.get_current_dir()
-            self.yaml = self._configure_yaml()
             self.scope = None
             
             # Load and validate manifest
             self.build_manifest = self._load_build_manifest()
             self.artifact_type = self._validate_artifact_type(self.build_manifest.get('type'))
-            self.dist_dir = None
-            self.package_files = None
+
+            if not self.is_private_registry:
+                self._ensure_authenticated()
+                self._set_scope_from_accounts()
+
         except Exception as e:
             if not isinstance(e, MurError):
                 raise MurError(code=207, message=str(e), original_error=e)
@@ -118,24 +117,6 @@ class BuildCommand(ArtifactCommand):
                 debug_messages=[f'Found artifact_type: {artifact_type}'],
             )
         return artifact_type
-
-    def _configure_yaml(self) -> YAML:
-        """Configure YAML parser settings.
-
-        Configures a YAML parser with specific formatting settings for consistent
-        file generation and parsing.
-
-        Returns:
-            YAML: Configured YAML parser with specific formatting settings.
-        """
-        yaml = YAML()
-        yaml.default_flow_style = False
-        yaml.explicit_start = False
-        yaml.explicit_end = False
-        yaml.preserve_quotes = True
-        yaml.indent(mapping=2, sequence=4, offset=2)
-        yaml.allow_duplicate_keys = True  # Prep for graph feature 🚀
-        return yaml
 
     def _load_build_manifest(self) -> dict:
         """Load manifest from murmur-build.yaml.
@@ -439,16 +420,11 @@ class BuildCommand(ArtifactCommand):
         except Exception as e:
             raise MurError(code=205, message='Failed to write murmur-build.yaml', original_error=e)
 
-    def _build_package(self, artifact_path: Path) -> tuple[Path, list[str]]:
+    def _build_package(self, artifact_path: Path) -> None:
         """Build the package for publishing.
 
         Args:
             artifact_path: Path to the artifact directory containing pyproject.toml
-
-        Returns:
-            tuple[Path, list[str]]: A tuple containing:
-                - dist_directory (Path): Directory containing the built files
-                - package_files (list[str]): List of built package filenames
 
         Raises:
             MurError: If the package build process fails.
@@ -457,12 +433,9 @@ class BuildCommand(ArtifactCommand):
             builder = ArtifactBuilder(artifact_path, self.verbose)
             result = builder.build(self.artifact_type)
             logger.debug(f"Built package files: {', '.join(result.package_files)}")
-            self.dist_dir = result.dist_dir
-            self.package_files = result.package_files
-            return result.dist_dir, result.package_files
         except MurError as e:
             e.handle()
-            raise  # Re-raise the MurError after handling
+            raise
 
     def execute(self) -> None:
         """Execute the build command.
@@ -475,15 +448,6 @@ class BuildCommand(ArtifactCommand):
             MurError: If build process fails at any stage.
         """
         try:
-            # Detect private or public registry path
-            index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
-            if index_url != DEFAULT_MURMUR_INDEX_URL:
-                self.is_private_registry = True
-
-            if not self.is_private_registry:
-                self._ensure_authenticated()
-                self._set_scope_from_accounts()
-
             # Validate the artifact name and version
             is_valid_artifact_name_version(self.build_manifest['name'], self.build_manifest['version'])
 

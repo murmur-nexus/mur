@@ -52,7 +52,7 @@ class ArtifactCommand:
         self.murmurrc_path = self._get_murmurrc_path()
         
         # Follow the registry adapter flow
-        self.registry_adapter = get_registry_adapter(self.murmurrc_path, self.verbose)
+        self.registry_adapter = get_registry_adapter(self.murmurrc_path, self.command_name, self.verbose)
         self.is_private_registry = isinstance(self.registry_adapter, PrivateRegistryAdapter)
         self.index_url = get_index_url_from_config(self.murmurrc_path, self.verbose)
             
@@ -199,14 +199,19 @@ class ArtifactCommand:
     def _configure_yaml(self) -> YAML:
         """Configure YAML parser settings.
 
+        Configures a YAML parser with specific formatting settings for consistent
+        file generation and parsing.
+
         Returns:
-            YAML: Configured YAML parser instance with specific formatting settings.
+            YAML: Configured YAML parser with specific formatting settings.
         """
         yaml = YAML()
         yaml.default_flow_style = False
         yaml.explicit_start = False
         yaml.explicit_end = False
         yaml.preserve_quotes = True
+        yaml.indent(mapping=2, sequence=4, offset=2)
+        yaml.allow_duplicate_keys = True  # Prep for graph feature 🚀
         return yaml
 
     def _load_murmur_yaml_from_current_dir(self) -> ArtifactManifest:

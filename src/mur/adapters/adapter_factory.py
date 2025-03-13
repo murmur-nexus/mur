@@ -92,7 +92,7 @@ def verify_registry_settings(murmurrc_path: Path, verbose: bool = False) -> bool
         )
 
 
-def get_registry_adapter(murmurrc_path: Path, verbose: bool = False) -> RegistryAdapter:
+def get_registry_adapter(murmurrc_path: Path, command_name: str, verbose: bool = False) -> RegistryAdapter:
     """Get the appropriate registry adapter based on environment.
 
     Determines whether to use a public or private registry adapter based on
@@ -109,10 +109,14 @@ def get_registry_adapter(murmurrc_path: Path, verbose: bool = False) -> Registry
     """
     # Check if it's a private registry based on the murmurrc file
     use_private = verify_registry_settings(murmurrc_path, verbose)
+
+    omit_logging_commands = ['config']
     
     if use_private:
-        logger.info('Using private PyPI server')
+        if command_name not in omit_logging_commands:
+            logger.info('Using private PyPI server')
         return PrivateRegistryAdapter(verbose)
 
-    logger.info('Using public Murmur Nexus registry')
+    if command_name not in omit_logging_commands:
+        logger.info('Using public Murmur Nexus registry')
     return PublicRegistryAdapter(verbose)
