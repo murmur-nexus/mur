@@ -9,8 +9,8 @@ from requests.exceptions import RequestException
 
 from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactManifest
-from ..core.requests import ApiClient
-from ..utils.constants import DEFAULT_MURMUR_INDEX_URL, MURMUR_SERVER_URL, GLOBAL_MURMURRC_PATH
+from ..core.api_client import ApiClient
+from ..utils.constants import GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
 from ..utils.models import ArtifactPublishRequest, ArtifactPublishResponse
 from .base_adapter import RegistryAdapter
@@ -30,10 +30,8 @@ class PublicRegistryAdapter(RegistryAdapter):
 
     def __init__(self, verbose: bool = False):
         super().__init__(verbose)
-        self.base_url = MURMUR_SERVER_URL.rstrip('/')
-        self.is_private_registry = False
-        self.auth_manager = AuthenticationManager.create(verbose=verbose, base_url=self.base_url)
-        self.api_client = ApiClient(base_url=self.base_url, verbose=verbose)
+        self.auth_manager = AuthenticationManager.create(verbose=verbose)
+        self.api_client = ApiClient(verbose=verbose)
 
     def publish_artifact(
         self,
@@ -195,22 +193,25 @@ class PublicRegistryAdapter(RegistryAdapter):
             local_murmurrc = Path.cwd() / '.murmurrc'
             murmurrc_path = local_murmurrc if local_murmurrc.exists() else GLOBAL_MURMURRC_PATH
             
-            # Get index URLs from .murmurrc
             config = configparser.ConfigParser()
             config.read(murmurrc_path)
-
-            # Get primary index from config
-            index_url = config.get('murmur-nexus', 'index-url', fallback=DEFAULT_MURMUR_INDEX_URL)
-            indexes = [index_url]
 
             # Add extra index URLs from config if present
             if config.has_option('murmur-nexus', 'extra-index-url'):
                 extra_urls = config.get('murmur-nexus', 'extra-index-url')
-                indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
+                extra_indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
 
+            indexes = [self.index_url]
+            indexes.extend(extra_indexes)
+            
             return indexes
 
         except Exception as e:
+            if isinstance(e, MurError):
+                raise
             logger.warning(f'Failed to read .murmurrc config: {e}')
-            # Fall back to just the primary index if config read fails
-            return [f'{self.base_url}/simple/']
+            raise MurError(
+                code=213,
+                message='Failed to get private registry configuration',
+                detail='Ensure .murmurrc is properly configured with [murmur-nexus] section and index-url.',
+            )

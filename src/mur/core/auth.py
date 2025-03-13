@@ -7,7 +7,7 @@ from ..utils.constants import DEFAULT_TIMEOUT, MURMUR_SERVER_URL
 from ..utils.error_handler import MurError
 from .cache import CredentialCache
 from .config import ConfigManager
-from .requests import ApiClient
+from .api_client import ApiClient
 from ..utils.models import LoginRequest, LoginResponse, UserConfig, AccountListResponse
 
 logger = logging.getLogger(__name__)
@@ -289,7 +289,7 @@ class AuthenticationManager:
             raise MurError(code=501, message='Failed to clear credentials', original_error=e)
 
     @classmethod
-    def create(cls, verbose: bool = False, base_url: str = MURMUR_SERVER_URL) -> 'AuthenticationManager':
+    def create(cls, verbose: bool = False, base_url: str = MURMUR_SERVER_URL.rstrip('/')) -> 'AuthenticationManager':
         """Create an AuthenticationManager with dependencies.
 
         Factory method to create a new instance with proper configuration.
@@ -297,7 +297,7 @@ class AuthenticationManager:
         Args:
             verbose (bool, optional): Enable verbose logging. Defaults to False.
             base_url (str, optional): Base URL for the registry API.
-                Defaults to MURMUR_SERVER_URL.
+                Defaults to MURMUR_SERVER_URL.rstrip('/').
 
         Returns:
             AuthenticationManager: Configured instance

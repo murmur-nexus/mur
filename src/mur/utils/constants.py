@@ -8,9 +8,6 @@ MURMUR_SERVER_URL = os.getenv('MURMUR_SERVER_URL', 'https://api.murmur.nexus/v1'
 
 # Configuration
 DEFAULT_TIMEOUT = 30
-
-# PyPI Server
-MURMUR_INDEX_URL = os.getenv('MURMUR_INDEX_URL')
 DEFAULT_MURMUR_INDEX_URL = 'https://artifacts.murmur.nexus/simple'
 DEFAULT_MURMUR_EXTRA_INDEX_URLS = [
     'https://pypi.org/simple',

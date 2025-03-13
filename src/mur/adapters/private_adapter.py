@@ -9,7 +9,6 @@ from twine.settings import Settings
 from mur.core.packaging import ArtifactManifest
 
 from ..utils.constants import (
-    MURMUR_INDEX_URL,
     PYPI_PASSWORD,
     PYPI_USERNAME,
     GLOBAL_MURMURRC_PATH,
@@ -32,8 +31,6 @@ class PrivateRegistryAdapter(RegistryAdapter):
 
     def __init__(self, verbose: bool = False):
         super().__init__(verbose)
-        self.base_url = MURMUR_INDEX_URL
-        self.is_private_registry = True
 
     def publish_artifact(
         self,
@@ -53,7 +50,7 @@ class PrivateRegistryAdapter(RegistryAdapter):
         try:
             logger.debug(f'Publishing artifact: {manifest.to_dict()}')
 
-            repository_url = self.base_url.rstrip('/').replace('/simple', '')
+            repository_url = self.index_url.rstrip('/').replace('/simple', '')
             response = {
                 'status': 'pending',
                 'message': 'Ready for file upload',
@@ -123,24 +120,13 @@ class PrivateRegistryAdapter(RegistryAdapter):
             config = configparser.ConfigParser()
             config.read(murmurrc_path)
 
-            # Get primary index from config
-            index_url = config.get('murmur-nexus', 'index-url', fallback=None)
-
-            # If no index URL, raise error
-            if not index_url:
-                raise MurError(
-                    code=807,
-                    message='No private registry URL configured',
-                    detail="Set 'index-url' in .murmurrc [murmur-nexus] section.",
-                )
-
-            # Get extra indexes from config
+            # Add extra index URLs from config if present
             extra_indexes = []
             if config.has_option('murmur-nexus', 'extra-index-url'):
                 extra_urls = config.get('murmur-nexus', 'extra-index-url')
                 extra_indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
 
-            indexes = [index_url]
+            indexes = [self.index_url]
             indexes.extend(extra_indexes)
 
             return indexes
@@ -150,7 +136,7 @@ class PrivateRegistryAdapter(RegistryAdapter):
                 raise
             logger.warning(f'Failed to read .murmurrc config: {e}')
             raise MurError(
-                code=807,
+                code=213,
                 message='Failed to get private registry configuration',
                 detail='Ensure .murmurrc is properly configured with [murmur-nexus] section and index-url.',
             )

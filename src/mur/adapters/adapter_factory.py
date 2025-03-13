@@ -1,6 +1,7 @@
 import logging
 import configparser
 from pathlib import Path
+from typing import Optional
 
 from ..utils.constants import DEFAULT_MURMUR_INDEX_URL, GLOBAL_MURMURRC_PATH
 from .base_adapter import RegistryAdapter
@@ -11,18 +12,15 @@ from ..utils.error_handler import MurError
 logger = logging.getLogger(__name__)
 
 
-def verify_registry_settings(murmurrc_path: Path, verbose: bool = False) -> bool:
-    """Verify registry settings in the .murmurrc file.
-    
-    Checks if the index-url in the .murmurrc file is different from the default,
-    which indicates a private registry is being used.
+def get_index_url_from_config(murmurrc_path: Path, verbose: bool = False) -> str:
+    """Get the index-url from the .murmurrc configuration file.
     
     Args:
         murmurrc_path: Path to the .murmurrc file
         verbose: Whether to enable verbose logging
         
     Returns:
-        bool: True if a private registry is configured, False otherwise
+        str: The index URL from the configuration or the default URL if not found
         
     Raises:
         MurError: If index-url is not found in the .murmurrc file
@@ -39,20 +37,59 @@ def verify_registry_settings(murmurrc_path: Path, verbose: bool = False) -> bool
             )
         
         index_url = config.get('murmur-nexus', 'index-url')
-        # If index_url is different from default, it's a private registry
-        if verbose:
-            logger.info(f"Using registry at {index_url}")
-        return index_url != DEFAULT_MURMUR_INDEX_URL
+        
+        # Validate URL format
+        if not index_url.startswith('http'):
+            raise MurError(
+                code=213,
+                message="Invalid registry URL", 
+                detail="Registry URL must start with 'http' or 'https'"
+            )
+
+        return index_url
         
     except Exception as e:
         if not isinstance(e, MurError):
             raise MurError(
                 code=213,
-                message="Failed to verify registry settings",
+                message="Failed to read registry settings",
                 detail=f"Error reading registry configuration: {str(e)}",
                 original_error=e
             )
         raise
+
+
+def verify_registry_settings(murmurrc_path: Path, verbose: bool = False) -> bool:
+    """Verify registry settings in the .murmurrc file.
+    
+    Checks if the index-url in the .murmurrc file is different from the default,
+    which indicates a private registry is being used.
+    
+    Args:
+        murmurrc_path: Path to the .murmurrc file
+        verbose: Whether to enable verbose logging
+        
+    Returns:
+        bool: True if a private registry is configured, False otherwise
+    """
+    try:
+        index_url = get_index_url_from_config(murmurrc_path, verbose)
+        
+        # Return False if it matches default URL
+        if index_url == DEFAULT_MURMUR_INDEX_URL:
+            return False
+
+        return True
+        
+    except MurError:
+        raise
+    except Exception as e:
+        raise MurError(
+            code=213,
+            message="Failed to verify registry settings",
+            detail=f"Error verifying registry configuration: {str(e)}",
+            original_error=e
+        )
 
 
 def get_registry_adapter(murmurrc_path: Path, verbose: bool = False) -> RegistryAdapter:
@@ -62,7 +99,8 @@ def get_registry_adapter(murmurrc_path: Path, verbose: bool = False) -> Registry
     the configuration in .murmurrc file.
 
     Args:
-        verbose (bool, optional): Whether to enable verbose logging. Defaults to False.
+        murmurrc_path: Path to the .murmurrc file
+        verbose: Whether to enable verbose logging. Defaults to False.
 
     Returns:
         RegistryAdapter: Registry adapter instance:

@@ -8,7 +8,7 @@ from typing import ClassVar
 import click
 from ruamel.yaml import YAML
 
-from ..adapters.adapter_factory import get_registry_adapter
+from ..adapters.adapter_factory import get_registry_adapter, get_index_url_from_config
 from ..core.auth import AuthenticationManager
 from ..core.config import ConfigManager
 from ..core.packaging import ArtifactManifest, normalize_package_name
@@ -51,13 +51,11 @@ class ArtifactCommand:
         self.yaml = self._configure_yaml()
         self.murmurrc_path = self._get_murmurrc_path()
         
-        # Get the appropriate registry adapter
+        # Follow the registry adapter flow
         self.registry_adapter = get_registry_adapter(self.murmurrc_path, self.verbose)
-        self.is_private_registry = self.registry_adapter.is_private_registry
-        
-        self.config = ConfigManager()
-        self.auth_manager = AuthenticationManager.create(self.verbose)
-
+        self.is_private_registry = isinstance(self.registry_adapter, PrivateRegistryAdapter)
+        self.index_url = get_index_url_from_config(self.murmurrc_path, self.verbose)
+            
     def _get_murmurrc_path(self) -> Path:
         """Get the path to the .murmurrc file to use.
         

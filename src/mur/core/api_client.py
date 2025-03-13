@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional, Type, TypeVar, Generic, Union, List
 import requests
 from pydantic import BaseModel
 
-from ..utils.constants import DEFAULT_TIMEOUT
+from ..utils.constants import DEFAULT_TIMEOUT, MURMUR_SERVER_URL
 from ..utils.error_handler import MurError
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class ApiClient:
         verbose (bool): Flag for enabling verbose logging
     """
     
-    def __init__(self, base_url: str, verbose: bool = False) -> None:
+    def __init__(self, base_url: str = MURMUR_SERVER_URL.rstrip('/'), verbose: bool = False) -> None:
         """Initialize the API client.
         
         Args:
