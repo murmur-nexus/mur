@@ -31,6 +31,7 @@ class PublicRegistryAdapter(RegistryAdapter):
     def __init__(self, verbose: bool = False):
         super().__init__(verbose)
         self.base_url = MURMUR_SERVER_URL.rstrip('/')
+        self.is_private_registry = False
         self.auth_manager = AuthenticationManager.create(verbose=verbose, base_url=self.base_url)
         self.api_client = ApiClient(base_url=self.base_url, verbose=verbose)
 

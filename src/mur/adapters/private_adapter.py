@@ -33,6 +33,7 @@ class PrivateRegistryAdapter(RegistryAdapter):
     def __init__(self, verbose: bool = False):
         super().__init__(verbose)
         self.base_url = MURMUR_INDEX_URL
+        self.is_private_registry = True
 
     def publish_artifact(
         self,

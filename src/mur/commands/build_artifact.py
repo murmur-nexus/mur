@@ -48,15 +48,10 @@ class BuildCommand(ArtifactCommand):
             self.current_dir = self.get_current_dir()
             self.yaml = self._configure_yaml()
             self.scope = None
-            self.private_registry = False
             
             # Load and validate manifest
             self.build_manifest = self._load_build_manifest()
             self.artifact_type = self._validate_artifact_type(self.build_manifest.get('type'))
-            
-            # Re-initialize parent with correct artifact type
-            super().__init__(self.artifact_type, verbose)
-            
             self.dist_dir = None
             self.package_files = None
         except Exception as e:
@@ -281,13 +276,13 @@ class BuildCommand(ArtifactCommand):
             list[str]: Lines for the project section of pyproject.toml, including
                 name, version, description, and other metadata.
         """
-        if not self.private_registry and not self.scope:
+        if not self.is_private_registry and not self.scope:
             raise MurError(
                 code=507,
                 message="No scope set",
                 detail="A scope is required for publishing to the public registry. Please run 'mur login' first."
             )
-        prefix = f'{self.scope}-' if not self.private_registry else ''
+        prefix = f'{self.scope}-' if not self.is_private_registry else ''
         artifact_name = f'{prefix}{self.build_manifest["name"]}'.lower()
         content = [
             '[project]',
@@ -483,9 +478,9 @@ class BuildCommand(ArtifactCommand):
             # Detect private or public registry path
             index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
             if index_url != DEFAULT_MURMUR_INDEX_URL:
-                self.private_registry = True
+                self.is_private_registry = True
 
-            if not self.private_registry:
+            if not self.is_private_registry:
                 self._ensure_authenticated()
                 self._set_scope_from_accounts()
 

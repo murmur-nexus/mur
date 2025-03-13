@@ -37,21 +37,23 @@ class ArtifactCommand:
             command_name: Name of the command
             verbose: Whether to enable verbose output
         """
+        # Add debug logging to track initialization
+        logger.debug(f"Initializing ArtifactCommand for '{command_name}' (id: {id(self)})")
+        
+        # Mark as initialized to prevent double initialization
+        self._initialized = True
+        
         self.command_name = command_name
         self.verbose = verbose
 
-        # Initialize yaml and current_dir for config loading
+        # Initialize yaml and paths
         self.current_dir = self.get_current_dir()
         self.yaml = self._configure_yaml()
-        
-        # Store the murmurrc path
         self.murmurrc_path = self._get_murmurrc_path()
         
         # Get the appropriate registry adapter
         self.registry_adapter = get_registry_adapter(self.murmurrc_path, self.verbose)
-        
-        # Determine based on the adapter type
-        self.private_registry = isinstance(self.registry_adapter, PrivateRegistryAdapter)
+        self.is_private_registry = self.registry_adapter.is_private_registry
         
         self.config = ConfigManager()
         self.auth_manager = AuthenticationManager.create(self.verbose)
