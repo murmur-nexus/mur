@@ -33,6 +33,10 @@ class PublishCommand(ArtifactCommand):
             super().__init__('publish', verbose)
 
             self.scope = None
+            
+            if not self.is_private_registry:
+                self._ensure_authenticated()
+            
             # Load manifest and determine artifact type
             try:
                 self.manifest = self._load_murmur_yaml_from_artifact()
@@ -98,7 +102,7 @@ class PublishCommand(ArtifactCommand):
                     )
 
             manifest.type = self.artifact_type
-            registered_artifact = self.registry.publish_artifact(manifest)
+            registered_artifact = self.registry_adapter.publish_artifact(manifest)
 
             # Match and upload files using signed URLs
             for signed_url_info in registered_artifact.get('signed_upload_urls', []):
@@ -116,7 +120,7 @@ class PublishCommand(ArtifactCommand):
                     file_path = dist_dir / matching_file
                     if self.verbose:
                         logger.info(f'Uploading {matching_file}...')
-                    self.registry.upload_file(file_path, signed_url)
+                    self.registry_adapter.upload_file(file_path, signed_url)
                 else:
                     logger.warning(f'No matching file found for type: {file_type}')
 
@@ -171,19 +175,6 @@ class PublishCommand(ArtifactCommand):
             Exception: If any step of the publishing process fails
         """
         try:
-            print('publish_artifact.py')
-            self.manifest = self._load_murmur_yaml_from_artifact()
-            # Get primary publish URL from .murmurrc
-            index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
-            print(f'index_url: {index_url}')
-            print(f'DEFAULT_MURMUR_INDEX_URL: {DEFAULT_MURMUR_INDEX_URL}')
-            # Create appropriate adapter based on index URL
-            if index_url != DEFAULT_MURMUR_INDEX_URL:
-                self.registry = PrivateRegistryAdapter(verbose=self.verbose)
-            else:
-                self._ensure_authenticated()
-                self.registry = PublicRegistryAdapter(verbose=self.verbose)
-
             # Find artifact files
             dist_dir, artifact_files = self._find_artifact_files()
             self.scope = artifact_files[0].split('_')[0]
@@ -227,7 +218,10 @@ def publish_command() -> click.Command:
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
     def publish(verbose: bool) -> None:
         """Publish an artifact to the Murmur registry."""
-        cmd = PublishCommand(verbose)
-        cmd.execute()
+        try:
+            cmd = PublishCommand(verbose)
+            cmd.execute()
+        except MurError as e:
+            e.handle()
 
     return publish

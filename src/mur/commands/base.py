@@ -23,12 +23,7 @@ class ArtifactCommand:
 
     This class provides common functionality for commands that interact with artifacts,
     including manifest management, authentication, and registry operations.
-
-    Attributes:
-        REGISTRY_COMMANDS: List of commands that require registry configuration.
     """
-
-    REGISTRY_COMMANDS: ClassVar[list[str]] = ['install', 'publish']
 
     def __init__(self, command_name: str, verbose: bool = False) -> None:
         """Initialize artifact command.
