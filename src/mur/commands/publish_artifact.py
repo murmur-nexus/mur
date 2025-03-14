@@ -20,17 +20,17 @@ class PublishCommand(ArtifactCommand):
     Supports both agent and tool artifact types.
     """
 
-    def __init__(self, verbose: bool = False) -> None:
+    def __init__(self, verbose: bool = False, index_url: str | None = None) -> None:
         """Initialize publish command.
 
         Args:
             verbose (bool): Whether to enable verbose output. Defaults to False.
-
+            index_url (str | None): The index URL to use for publishing. Defaults to None.
         Raises:
             MurError: If the artifact type in murmur.yaml is invalid.
         """
         try:
-            super().__init__('publish', verbose)
+            super().__init__('publish', verbose, index_url)
 
             self.scope = None
             
@@ -64,7 +64,7 @@ class PublishCommand(ArtifactCommand):
         Returns:
             str: artifact name with scope removed if it was present
         """
-        if not self.scope:
+        if self.is_private_registry:
             return artifact_name
 
         scope_prefix = f'{self.scope}_'
@@ -72,11 +72,10 @@ class PublishCommand(ArtifactCommand):
             return artifact_name[len(scope_prefix):]
         return artifact_name
 
-    def _publish_files(self, manifest: ArtifactManifest, dist_dir: Path, artifact_files: list[str]) -> None:
+    def _publish_files(self, dist_dir: Path, artifact_files: list[str]) -> None:
         """Publish built artifact files to registry.
 
         Args:
-            manifest (ArtifactManifest): Artifact manifest containing metadata
             dist_dir (Path): Directory containing built files
             artifact_files (list[str]): List of artifact files to publish
 
@@ -88,7 +87,7 @@ class PublishCommand(ArtifactCommand):
                 logger.info('Publishing artifact...')
 
             # Validate artifact names in build files
-            normalized_name = normalize_package_name(manifest.name)
+            normalized_name = normalize_package_name(self.manifest.name)
             for file_name in artifact_files:
                 # Extract artifact name from file (everything before first dash)
                 artifact_name = file_name.split('-')[0]
@@ -101,8 +100,8 @@ class PublishCommand(ArtifactCommand):
                         detail=f'Expected normalized name "{normalized_name}" but found "{unscoped_artifact_name}".',
                     )
 
-            manifest.type = self.artifact_type
-            registered_artifact = self.registry_adapter.publish_artifact(manifest)
+            self.manifest.type = self.artifact_type
+            registered_artifact = self.registry_adapter.publish_artifact(self.manifest, self.scope)
 
             # Match and upload files using signed URLs
             for signed_url_info in registered_artifact.get('signed_upload_urls', []):
@@ -180,11 +179,16 @@ class PublishCommand(ArtifactCommand):
             self.scope = artifact_files[0].split('_')[0]
             
             # Publish package files
-            self._publish_files(self.manifest, dist_dir, artifact_files)
+            self._publish_files(dist_dir, artifact_files)
 
             normalized_artifact_name = normalize_package_name(self.manifest.name)
+            if self.is_private_registry:
+                artifact_name = normalized_artifact_name
+            else:
+                artifact_name = f'{self.scope}_{normalized_artifact_name}'
+            
             self.log_success(
-                f'Successfully published {self.artifact_type} ' f'{normalized_artifact_name}=={self.manifest.version}'
+                f'Successfully published {self.artifact_type} ' f'{artifact_name}=={self.manifest.version}'
             )
 
         except Exception as e:

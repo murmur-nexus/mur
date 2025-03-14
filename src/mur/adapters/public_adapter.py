@@ -36,6 +36,7 @@ class PublicRegistryAdapter(RegistryAdapter):
     def publish_artifact(
         self,
         manifest: ArtifactManifest,
+        scope: str | None = None,
     ) -> dict[str, Any]:
         """Publish an artifact to the registry.
 
@@ -53,6 +54,12 @@ class PublicRegistryAdapter(RegistryAdapter):
         try:
             # Create request payload from manifest
             payload = ArtifactPublishRequest.from_manifest(manifest)
+
+            # Add scope to payload if provided
+            if scope:
+                payload.name = f'{scope}-{payload.name}'
+            else:
+                raise MurError(502, 'Scope is required for public registry')
             
             if self.verbose:
                 logger.debug(f'Publishing payload: {payload.model_dump(exclude_none=True)}')

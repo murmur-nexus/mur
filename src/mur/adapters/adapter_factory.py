@@ -109,14 +109,15 @@ def get_registry_adapter(murmurrc_path: Path, command_name: str, verbose: bool =
     """
     # Check if it's a private registry based on the murmurrc file
     use_private = verify_registry_settings(murmurrc_path, verbose)
+    index_url = get_index_url_from_config(murmurrc_path, verbose)
 
     omit_logging_commands = ['config']
     
     if use_private:
         if command_name not in omit_logging_commands:
             logger.info('Using private PyPI server')
-        return PrivateRegistryAdapter(verbose)
+        return PrivateRegistryAdapter(verbose, index_url)
 
     if command_name not in omit_logging_commands:
         logger.info('Using public Murmur Nexus registry')
-    return PublicRegistryAdapter(verbose)
+    return PublicRegistryAdapter(verbose, index_url)

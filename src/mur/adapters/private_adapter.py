@@ -29,17 +29,25 @@ class PrivateRegistryAdapter(RegistryAdapter):
         verbose (bool, optional): Enable verbose logging output. Defaults to False.
     """
 
-    def __init__(self, verbose: bool = False):
-        super().__init__(verbose)
+    def __init__(self, verbose: bool = False, index_url: str | None = None):
+        """Initialize the private registry adapter.
+
+        Args:
+            verbose (bool, optional): Enable verbose logging output. Defaults to False.
+            index_url (str | None, optional): URL of the private PyPI registry. Defaults to None.
+        """
+        super().__init__(verbose, index_url)
 
     def publish_artifact(
         self,
         manifest: ArtifactManifest,
+        scope: str | None = None,  # Intentionally ignored for private registry
     ) -> dict[str, Any]:
         """Publish an artifact to the private PyPI registry.
 
         Args:
             manifest (ArtifactManifest): The artifact manifest containing metadata and file info
+            scope (str | None, optional): Scope parameter is ignored for private registry. Defaults to None.
 
         Returns:
             dict[str, Any]: Response containing status and message about the publish operation.
@@ -65,7 +73,7 @@ class PrivateRegistryAdapter(RegistryAdapter):
         except Exception as e:
             if isinstance(e, MurError):
                 raise
-            raise MurError(200, f'Failed to publish to private registry: {e!s}') from e
+            raise MurError(600, f'Failed to publish to private registry: {e!s}') from e
 
     def upload_file(self, file_path: Path, signed_url: str) -> None:
         """Upload a file to the registry using a URL.
