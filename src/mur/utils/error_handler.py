@@ -82,6 +82,7 @@ class MurError(Exception):
         210: 'Failed Creating File',
         211: 'Directory Not Found',
         212: 'File already exists',
+        213: 'Registry Configuration Error',
         # Category 3: Local Artifact State
         300: 'General Artifact Error',
         301: 'Artifact Already Installed',
@@ -101,6 +102,8 @@ class MurError(Exception):
         504: 'Token Expired',
         505: 'Insufficient Permissions',
         506: 'Rate Limit Exceeded',
+        507: 'Missing User Data',
+        508: 'Authentication Required',
         # Category 6: Remote Artifact Resolution
         600: 'General Resolution Error',
         601: 'Artifact Not Found',

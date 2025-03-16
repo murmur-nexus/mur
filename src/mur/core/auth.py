@@ -1,10 +1,11 @@
 import logging
 
 import click
-import requests
 
-from ..utils.constants import DEFAULT_TIMEOUT, MURMUR_SERVER_URL
+from ..utils.constants import MURMUR_SERVER_URL
 from ..utils.error_handler import MurError
+from ..utils.models import AccountListResponse, LoginRequest, LoginResponse, UserConfig
+from .api_client import ApiClient
 from .cache import CredentialCache
 from .config import ConfigManager
 
@@ -46,6 +47,8 @@ class AuthenticationManager:
             if verbose:
                 logger.setLevel(logging.DEBUG)
 
+            self.api_client = ApiClient(base_url, verbose)
+
         except MurError:
             raise
         except Exception as e:
@@ -67,16 +70,18 @@ class AuthenticationManager:
         """
         try:
             # Try cached access token
-            if access_token := self.cache.load_access_token():
+            if access_token := self.cache.load_credential('access_token'):
                 if self._validate_token(access_token):
                     logger.debug('Using cached access token')
                     return access_token
 
             # Try using cached credentials
-            if (username := str(self.config.get('username'))) and (password := self.cache.load_password()):
+            if (username := str(self.config.get('username'))) and (password := self.cache.load_credential('password')):
                 if self.verbose:
                     logger.info('Authenticating with cached credentials')
                 if access_token := self._authenticate(username, password):
+                    # Fetch user accounts
+                    self.fetch_user_accounts()
                     return access_token
 
             # Need to prompt for credentials
@@ -121,31 +126,36 @@ class AuthenticationManager:
 
         Note:
             On successful authentication, credentials are automatically cached.
+
+        Raises:
+            MurError: If authentication fails due to invalid credentials or server error
         """
         try:
-            url = f'{self.base_url}/auth/login'
-            query_params = {'grant_type': 'password'}
-            payload = {'username': username, 'password': password}
-            headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+            login_payload = LoginRequest(username=username, password=password)
 
-            verify_ssl = self.base_url.startswith('https://')
-
-            response = requests.post(
-                url, params=query_params, headers=headers, data=payload, timeout=DEFAULT_TIMEOUT, verify=verify_ssl
+            response = self.api_client.post(
+                endpoint='/auth/login',
+                payload=login_payload,
+                response_model=LoginResponse,
+                query_params={'grant_type': 'password'},
+                content_type='application/x-www-form-urlencoded',
             )
 
-            if response.status_code == 200:
-                data = response.json()
-                logger.debug(f'Access token: {data.get("access_token")}')
+            if response.status_code == 200 and response.data:
+                logger.debug(f'Access token: {response.data.access_token}')
 
-                if access_token := data.get('access_token'):
-                    # Get username from response if available, otherwise use input username
-                    username = data.get('user', {}).get('username', username)
-                    self._save_credentials(username, password, access_token)
-                    return username
+                if not response.data.user:
+                    raise MurError(code=507, message='Missing User Data', detail='Missing user data in response')
+
+                # User is already a UserConfig object, no need to create a new one
+                self._save_user_session(response.data.user)
+                self._save_credentials(password, response.data.access_token, response.data.refresh_token)
+                return response.data.access_token
 
             return None
 
+        except MurError:
+            raise
         except Exception as e:
             logger.debug(f'Error: {e}')
             raise MurError(
@@ -155,14 +165,14 @@ class AuthenticationManager:
                 original_error=e,
             )
 
-    def _save_credentials(self, username: str, password: str, access_token: str) -> None:
-        """Save credentials for future use."""
+    def _save_user_session(self, user: UserConfig) -> None:
+        """Save user session for future use."""
         try:
-            self.cache.save_access_token(access_token)
-
             # Get the current config from the manager and update it
             config = self.config_manager.config
-            config['username'] = username
+
+            # Since user is already a UserConfig object, we can directly use it
+            config.update(user.model_dump(exclude_none=True))
 
             # Save the updated config
             self.config_manager.save_config()
@@ -170,7 +180,18 @@ class AuthenticationManager:
             # Update our local copy
             self.config = self.config_manager.get_config()
 
-            self.cache.save_password(password)
+            logger.debug('Saved user session')
+        except MurError:
+            raise
+        except Exception as e:
+            raise MurError(code=501, message='Failed to save user session', original_error=e)
+
+    def _save_credentials(self, password: str, access_token: str, refresh_token: str) -> None:
+        """Save credentials for future use."""
+        try:
+            self.cache.save_credential('access_token', access_token)
+            self.cache.save_credential('refresh_token', refresh_token)
+            self.cache.save_credential('password', password)
             logger.debug('Saved credentials')
         except MurError:
             raise
@@ -206,6 +227,8 @@ class AuthenticationManager:
 
             # At this point username is guaranteed to be a str
             if access_token := self._authenticate(username, password):
+                # Fetch user accounts
+                self.fetch_user_accounts()
                 return access_token
 
             raise MurError(
@@ -225,26 +248,43 @@ class AuthenticationManager:
 
         Removes all cached credentials including:
         - Access token
+        - Refresh token
         - Password
-        - Username from configuration
-
+        - User data from configuration (id, username, email, etc.)
+        - User accounts from configuration
         Raises:
             MurError: If credentials cannot be cleared
         """
         try:
-            self.cache.clear_access_token()
-            self.cache.clear_password()
-            if 'username' in self.config:
-                self.config_manager.config.pop('username', None)
-                self.config_manager.save_config()
-            logger.debug('Cleared all credentials')
+            # Clear cached tokens and password
+            self.cache.clear_credential('access_token')
+            self.cache.clear_credential('refresh_token')
+            self.cache.clear_credential('password')
+
+            # Clear user data from config using UserConfig model fields
+            user_keys = list(UserConfig.model_fields.keys())
+
+            for key in user_keys:
+                if key in self.config_manager.config:
+                    self.config_manager.config.pop(key, None)
+
+            # Clear user_accounts from config
+            self.config_manager.config.pop('user_accounts', None)
+
+            # Save the updated config
+            self.config_manager.save_config()
+
+            # Update our local copy
+            self.config = self.config_manager.get_config()
+
+            logger.debug(f'Cleared all credentials and user data fields: {user_keys}')
         except MurError:
             raise
         except Exception as e:
             raise MurError(code=501, message='Failed to clear credentials', original_error=e)
 
     @classmethod
-    def create(cls, verbose: bool = False, base_url: str = MURMUR_SERVER_URL) -> 'AuthenticationManager':
+    def create(cls, verbose: bool = False, base_url: str = MURMUR_SERVER_URL.rstrip('/')) -> 'AuthenticationManager':
         """Create an AuthenticationManager with dependencies.
 
         Factory method to create a new instance with proper configuration.
@@ -252,7 +292,7 @@ class AuthenticationManager:
         Args:
             verbose (bool, optional): Enable verbose logging. Defaults to False.
             base_url (str, optional): Base URL for the registry API.
-                Defaults to MURMUR_SERVER_URL.
+                Defaults to MURMUR_SERVER_URL.rstrip('/').
 
         Returns:
             AuthenticationManager: Configured instance
@@ -265,3 +305,92 @@ class AuthenticationManager:
             return cls(config_manager, base_url, verbose)
         except Exception as e:
             raise MurError(code=501, message='Failed to create authentication manager', original_error=e)
+
+    def is_authenticated(self) -> bool:
+        """Check if the user is currently authenticated.
+
+        Returns:
+            bool: True if the user has valid credentials, False otherwise
+        """
+        try:
+            # Check if we have a valid access token
+            # TODO: Check expiration date and attempt refresh token auth
+            access_token = self.cache.load_credential('access_token')
+            if access_token and self._validate_token(access_token):
+                return True
+
+            # Check if we have cached credentials
+            username = self.config.get('username')
+            password = self.cache.load_credential('password')
+
+            # Consider the user authenticated if both username and password are present
+            return bool(username and password)
+
+        except Exception:
+            logger.debug('Error checking authentication status', exc_info=True)
+            return False
+
+    def fetch_user_accounts(self) -> list[str]:
+        """Fetch user accounts and store their names in configuration.
+
+        Returns:
+            list[str]: List of account names
+
+        Raises:
+            MurError: If fetching accounts fails
+        """
+        try:
+            # Get user ID from config
+            user_id = self.config.get('id')
+            if not user_id:
+                logger.debug('Missing user ID, cannot fetch accounts')
+                raise MurError(code=507, message='Missing User Data', detail='User ID is required to fetch accounts')
+
+            # Get access token from the current session
+            access_token = self.cache.load_credential('access_token')
+            if not access_token:
+                logger.debug('Missing access token, cannot fetch accounts')
+                raise MurError(
+                    code=507, message='Missing User Data', detail='Access token is required to fetch accounts'
+                )
+
+            response = self.api_client.get(
+                endpoint=f'/users/{user_id}/accounts',
+                headers={'Authorization': f'Bearer {access_token}'},
+                response_model=AccountListResponse,
+            )
+
+            if response.status_code != 200 or not response.data:
+                logger.debug(f'Failed to fetch accounts: {response.status_code}')
+                raise MurError(
+                    code=507,
+                    message='Failed to fetch user accounts',
+                    detail=f'Server returned status code {response.status_code}',
+                )
+
+            # Extract account names from the list of Account objects
+            account_names = [account.name for account in response.data]
+
+            # Save account names to config
+            self._save_user_accounts(account_names)
+
+            logger.debug(f'Saved user accounts: {account_names}')
+            return account_names
+
+        except MurError:
+            raise
+        except Exception as e:
+            logger.debug(f'Error fetching user accounts: {e}')
+            raise MurError(code=507, message='Failed to fetch user accounts', original_error=e)
+
+    def _save_user_accounts(self, account_names: list[str]) -> None:
+        """Save user accounts to configuration.
+
+        Args:
+            account_names: List of account names to save
+        """
+        self.config_manager.config['user_accounts'] = account_names  # type: ignore
+        self.config_manager.save_config()
+
+        # Update local config
+        self.config = self.config_manager.get_config()

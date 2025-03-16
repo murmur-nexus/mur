@@ -1,5 +1,4 @@
 import configparser
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -7,10 +6,12 @@ from typing import Any
 import requests
 from requests.exceptions import RequestException
 
+from ..core.api_client import ApiClient
 from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactManifest
-from ..utils.constants import DEFAULT_MURMUR_INDEX_URL, MURMUR_SERVER_URL, MURMURRC_PATH
+from ..utils.constants import GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
+from ..utils.models import ArtifactPublishRequest, ArtifactPublishResponse
 from .base_adapter import RegistryAdapter
 
 logger = logging.getLogger(__name__)
@@ -24,21 +25,25 @@ class PublicRegistryAdapter(RegistryAdapter):
 
     Args:
         verbose (bool, optional): Enable verbose logging. Defaults to False.
+        index_url (str | None, optional): The index URL to use for publishing. Defaults to None.
     """
 
-    def __init__(self, verbose: bool = False):
-        super().__init__(verbose)
-        self.base_url = MURMUR_SERVER_URL.rstrip('/')
-        self.auth_manager = AuthenticationManager.create(verbose=verbose, base_url=self.base_url)
+    def __init__(self, verbose: bool = False, index_url: str | None = None):
+        super().__init__(verbose, index_url)
+        self.auth_manager = AuthenticationManager.create(verbose=verbose)
+        self.api_client = ApiClient(verbose=verbose)
+        self.base_url = self.api_client.base_url
 
     def publish_artifact(
         self,
         manifest: ArtifactManifest,
+        scope: str | None = None,
     ) -> dict[str, Any]:
         """Publish an artifact to the registry.
 
         Args:
             manifest (ArtifactManifest): The artifact manifest containing metadata and file info
+            scope (str | None, optional): The scope to publish the artifact under. Defaults to None.
 
         Returns:
             dict[str, Any]: Server response containing artifact details.
@@ -46,18 +51,33 @@ class PublicRegistryAdapter(RegistryAdapter):
         Raises:
             MurError: If connection fails or server returns an error.
         """
-        url = f'{self.base_url}/artifacts'
-
         logger.debug(f'Publishing artifact: {manifest.to_dict()}')
 
         try:
+            # Create request payload from manifest
+            payload = ArtifactPublishRequest.from_manifest(manifest)
+
+            # Add scope to payload if provided
+            if scope:
+                payload.name = f'{scope}-{payload.name}'
+            else:
+                raise MurError(502, 'Scope is required for public registry')
+
+            if self.verbose:
+                logger.debug(f'Publishing payload: {payload.model_dump(exclude_none=True)}')
+
+            # Get authentication headers
             headers = self._get_headers()
-            response = requests.post(url, headers=headers, json=manifest.to_dict(), timeout=60)
 
-            if not response.ok:
-                self._handle_error_response(response)
+            # Make API request
+            response = self.api_client.post(
+                endpoint='/artifacts', payload=payload, response_model=ArtifactPublishResponse, headers=headers
+            )
 
-            return response.json()
+            if response.status_code != 200:
+                self._handle_error_response(response.status_code, response.error or 'Unknown error')
+
+            return response.raw_data
 
         except RequestException as e:
             if 'Connection refused' in str(e):
@@ -124,32 +144,26 @@ class PublicRegistryAdapter(RegistryAdapter):
         except MurError:
             raise
 
-    def _handle_error_response(self, response: requests.Response) -> None:
+    def _handle_error_response(self, status_code: int, error_message: str) -> None:
         """Handle error responses from the server.
 
         Args:
-            response (requests.Response): Response object from the server.
+            status_code (int): HTTP status code from the response
+            error_message (str): Error message from the response
 
         Raises:
             MurError: With appropriate error code and message based on the response.
         """
-        # Parse error response
-        try:
-            error_data = response.json()
-            detail = error_data.get('detail', '')
-        except json.JSONDecodeError:
-            detail = response.text
-
         # Handle specific error messages
-        if 'Token has expired' in detail:
+        if 'Token has expired' in error_message:
             raise MurError(
                 code=504,
                 message='Token has expired. Please log in again',
                 detail='Please run `mur logout` and try again.',
             )
-        if 'Could not validate credentials' in detail:
+        if 'Could not validate credentials' in error_message:
             raise MurError(502, 'Could not validate credentials')
-        if 'The package or file already exists in the feed' in detail:
+        if 'The package or file already exists in the feed' in error_message:
             raise MurError(302, 'Package with version already exists')
 
         # Map standard HTTP status codes
@@ -164,13 +178,12 @@ class PublicRegistryAdapter(RegistryAdapter):
         }
 
         # Get error code and message, with fallback to generic server error
-        error_code, error_message = STATUS_CODE_MAPPING.get(response.status_code, (800, 'Server error'))
+        error_code, default_message = STATUS_CODE_MAPPING.get(status_code, (800, 'Server error'))
 
         # Use provided detail if available
-        if detail:
-            error_message = detail
+        error_detail = error_message if error_message else default_message
 
-        raise MurError(error_code, error_message)
+        raise MurError(error_code, error_detail)
 
     def get_package_indexes(self) -> list[str]:
         """Get package indexes from .murmurrc configuration.
@@ -182,22 +195,32 @@ class PublicRegistryAdapter(RegistryAdapter):
             list[str]: List of package index URLs with primary index first.
         """
         try:
-            # Get index URLs from .murmurrc
-            config = configparser.ConfigParser()
-            config.read(MURMURRC_PATH)
+            # Get the path to the .murmurrc file
+            local_murmurrc = Path.cwd() / '.murmurrc'
+            murmurrc_path = local_murmurrc if local_murmurrc.exists() else GLOBAL_MURMURRC_PATH
 
-            # Get primary index from config
-            index_url = config.get('global', 'index-url', fallback=DEFAULT_MURMUR_INDEX_URL)
-            indexes = [index_url]
+            config = configparser.ConfigParser()
+            config.read(murmurrc_path)
+            extra_indexes: list[str] = []
 
             # Add extra index URLs from config if present
-            if config.has_option('global', 'extra-index-url'):
-                extra_urls = config.get('global', 'extra-index-url')
-                indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
+            if config.has_option('murmur-nexus', 'extra-index-url'):
+                extra_urls = config.get('murmur-nexus', 'extra-index-url')
+                extra_indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
+
+            # Ensure index_url is a string before adding to indexes
+            primary_index = self.index_url if self.index_url is not None else ''
+            indexes = [primary_index]
+            indexes.extend(extra_indexes)
 
             return indexes
 
         except Exception as e:
+            if isinstance(e, MurError):
+                raise
             logger.warning(f'Failed to read .murmurrc config: {e}')
-            # Fall back to just the primary index if config read fails
-            return [f'{self.base_url}/simple/']
+            raise MurError(
+                code=213,
+                message='Failed to get private registry configuration',
+                detail='Ensure .murmurrc is properly configured with [murmur-nexus] section and index-url.',
+            )

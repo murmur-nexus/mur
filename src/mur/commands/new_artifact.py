@@ -51,9 +51,9 @@ class NewArtifactCommand(ArtifactCommand):
         Raises:
             click.ClickException: If the configuration file already exists or creation fails.
         """
-        config_file = self.current_dir / 'murmur-build.yaml'
+        build_manifest = self.current_dir / 'murmur-build.yaml'
 
-        if config_file.exists():
+        if build_manifest.exists():
             raise MurError(
                 code=212,
                 message='murmur-build.yaml already exists in current directory',
@@ -72,11 +72,11 @@ class NewArtifactCommand(ArtifactCommand):
         }
 
         try:
-            with open(config_file, 'w') as f:
+            with open(build_manifest, 'w') as f:
                 self.yaml.dump(template, f)
             if self.verbose:
                 logger.info(f'Created murmur-build.yaml with {self.artifact_type} template')
-            logger.debug(f'Created build configuration at {config_file}')
+            logger.debug(f'Created build configuration at {build_manifest}')
         except Exception as e:
             raise MurError(code=210, message='Failed to create murmur-build.yaml', original_error=e)
 

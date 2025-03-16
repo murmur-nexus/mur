@@ -3,9 +3,8 @@ import shutil
 from pathlib import Path
 
 import click
-from ruamel.yaml import YAML
 
-from ..core.auth import AuthenticationManager
+from ..core.config import ConfigManager
 from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_package_name
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
@@ -27,8 +26,6 @@ class BuildCommand(ArtifactCommand):
         build_manifest (dict): The loaded build manifest configuration.
         artifact_type (str): Type of artifact ('agent' or 'tool').
         config (dict): The build configuration (alias for build_manifest).
-        dist_dir (Path): Directory containing the built files.
-        package_files (list[str]): List of built package filenames.
     """
 
     def __init__(self, verbose: bool = False) -> None:
@@ -38,75 +35,81 @@ class BuildCommand(ArtifactCommand):
             verbose: Whether to enable verbose output
 
         Raises:
-            MurError: If manifest validation fails
+            MurError: If initialization fails
         """
         try:
             super().__init__('build', verbose)
-
-            # Add auth manager initialization
-            self.auth_manager = AuthenticationManager.create(verbose=verbose)
-            self.username = self.auth_manager.config.get('username')
-            if not self.username:
-                raise MurError(
-                    code=401, message='No authenticated user found', detail="Please login first using 'mur login'"
-                )
+            self.verbose = verbose
+            self.scope = None
 
             # Load and validate manifest
-            try:
-                self.build_manifest = self._load_murmur_yaml_from_artifact()
-                self.artifact_type = self.build_manifest.type
-                self.build_manifest = self.build_manifest._metadata
-            except MurError as e:
-                e.handle()
+            self.build_manifest = self._load_build_manifest()
+            self.artifact_type = self._validate_artifact_type(self.build_manifest.get('type', ''))
 
-            if self.artifact_type not in ['agent', 'tool']:
-                raise MurError(
-                    code=207,
-                    message=f"Invalid artifact type '{self.artifact_type}'",
-                    detail="The artifact type in murmur.yaml must be either 'agent' or 'tool'.",
-                    debug_messages=[f'Found artifact_type: {self.artifact_type}'],
-                )
+            if not self.is_private_registry:
+                self._ensure_authenticated()
+                self._set_scope_from_accounts()
 
         except Exception as e:
             if not isinstance(e, MurError):
                 raise MurError(code=207, message=str(e), original_error=e)
             raise
 
-        self.verbose = verbose
-        self.current_dir = self.get_current_dir()
-        self.yaml = self._configure_yaml()
+    def _set_scope_from_accounts(self) -> None:
+        """Set scope from user accounts.
 
-        # Load config and determine artifact type
-        self.build_manifest = self._load_build_manifest()
-        self.artifact_type = self.build_manifest.get('type')
-        if self.artifact_type not in ['agent', 'tool']:
-            raise MurError(
-                code=207,
-                message=f"Invalid artifact type '{self.artifact_type}'",
-                detail="The artifact type in murmur-build.yaml must be either 'agent' or 'tool'.",
-                debug_messages=[f'Found artifact_type: {self.artifact_type}'],
-            )
-        super().__init__(self.artifact_type, verbose)
-        self.dist_dir = None
-        self.package_files = None
+        Loads user accounts from config and prompts user to select one if multiple exist.
 
-    def _configure_yaml(self) -> YAML:
-        """Configure YAML parser settings.
+        Raises:
+            MurError: If no user accounts are found or if loading fails
+        """
+        try:
+            config_manager = ConfigManager()
+            config = config_manager.get_config()
+            user_accounts = config.get('user_accounts', [])
 
-        Configures a YAML parser with specific formatting settings for consistent
-        file generation and parsing.
+            if not user_accounts:
+                raise MurError(
+                    code=507,
+                    message='No user accounts found',
+                    detail='At least one user account is required. Please create an account first.',
+                )
+
+            # Prompt user to select account if multiple exist
+            if len(user_accounts) > 1:
+                self.scope = click.prompt('Select account', type=click.Choice(user_accounts), show_choices=True)
+            else:
+                self.scope = user_accounts[0]
+        except Exception as e:
+            if not isinstance(e, MurError):
+                raise MurError(
+                    code=507,
+                    message='Failed to get user accounts',
+                    detail='Could not retrieve user accounts from configuration',
+                    original_error=e,
+                )
+            raise
+
+    def _validate_artifact_type(self, artifact_type: str) -> str:
+        """Validate the artifact type.
+
+        Args:
+            artifact_type: The artifact type to validate
 
         Returns:
-            YAML: Configured YAML parser with specific formatting settings.
+            The validated artifact type
+
+        Raises:
+            MurError: If the artifact type is invalid
         """
-        yaml = YAML()
-        yaml.default_flow_style = False
-        yaml.explicit_start = False
-        yaml.explicit_end = False
-        yaml.preserve_quotes = True
-        yaml.indent(mapping=2, sequence=4, offset=2)
-        yaml.allow_duplicate_keys = True  # Prep for graph feature 🚀
-        return yaml
+        if artifact_type not in ['agent', 'tool']:
+            raise MurError(
+                code=207,
+                message=f"Invalid artifact type '{artifact_type}'",
+                detail="The artifact type in murmur-build.yaml must be either 'agent' or 'tool'.",
+                debug_messages=[f'Found artifact_type: {artifact_type}'],
+            )
+        return artifact_type
 
     def _load_build_manifest(self) -> dict:
         """Load manifest from murmur-build.yaml.
@@ -247,9 +250,17 @@ class BuildCommand(ArtifactCommand):
             list[str]: Lines for the project section of pyproject.toml, including
                 name, version, description, and other metadata.
         """
+        if not self.is_private_registry and not self.scope:
+            raise MurError(
+                code=507,
+                message='No scope set',
+                detail="A scope is required for publishing to the public registry. Please run 'mur login' first.",
+            )
+        prefix = f'{self.scope}-' if not self.is_private_registry else ''
+        artifact_name = f'{prefix}{self.build_manifest["name"]}'.lower()
         content = [
             '[project]',
-            f'name = "{self.username}.{self.build_manifest["name"].lower()}"',
+            f'name = "{artifact_name}"',
             f'version = "{self.build_manifest["version"]}"',
         ]
 
@@ -402,16 +413,11 @@ class BuildCommand(ArtifactCommand):
         except Exception as e:
             raise MurError(code=205, message='Failed to write murmur-build.yaml', original_error=e)
 
-    def _build_package(self, artifact_path: Path) -> tuple[Path, list[str]]:
+    def _build_package(self, artifact_path: Path) -> None:
         """Build the package for publishing.
 
         Args:
             artifact_path: Path to the artifact directory containing pyproject.toml
-
-        Returns:
-            tuple[Path, list[str]]: A tuple containing:
-                - dist_directory (Path): Directory containing the built files
-                - package_files (list[str]): List of built package filenames
 
         Raises:
             MurError: If the package build process fails.
@@ -420,12 +426,9 @@ class BuildCommand(ArtifactCommand):
             builder = ArtifactBuilder(artifact_path, self.verbose)
             result = builder.build(self.artifact_type)
             logger.debug(f"Built package files: {', '.join(result.package_files)}")
-            self.dist_dir = result.dist_dir
-            self.package_files = result.package_files
-            return result.dist_dir, result.package_files
         except MurError as e:
             e.handle()
-            raise  # Re-raise the MurError after handling
+            raise
 
     def execute(self) -> None:
         """Execute the build command.

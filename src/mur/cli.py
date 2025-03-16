@@ -4,6 +4,7 @@ import os
 import click
 
 from .commands.build_artifact import build_command
+from .commands.config_artifacts import config_command
 from .commands.install_artifacts import install_command
 from .commands.new_artifact import new_command
 from .commands.publish_artifact import publish_command
@@ -76,7 +77,8 @@ def login(verbose: bool) -> None:
     """
     try:
         auth_manager = AuthenticationManager.create(verbose)
-        username = auth_manager.authenticate()
+        auth_manager.authenticate()
+        username = auth_manager.config.get('username')
         click.echo(f'Login successful for {username}')
     except MurError as e:
         e.handle()
@@ -109,6 +111,7 @@ main.add_command(uninstall_command())
 main.add_command(new_command())
 main.add_command(build_command())
 main.add_command(publish_command())
+main.add_command(config_command())
 
 if __name__ == '__main__':
     main()

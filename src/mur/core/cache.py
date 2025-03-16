@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class CredentialCache:
     """Handles secure storage and retrieval of credentials.
 
-    This class provides methods to securely store and retrieve access tokens
-    and passwords using the system keyring.
+    This class provides methods to securely store and retrieve credentials
+    using the system keyring.
     """
 
     def __init__(self) -> None:
@@ -22,122 +22,69 @@ class CredentialCache:
         """
         self.service_name = 'mur'
 
-    def save_access_token(self, access_token: str) -> None:
-        """Save access token securely.
+    def save_credential(self, credential_type: str, value: str) -> None:
+        """Save credential securely.
 
         Args:
-            access_token: The access token string to store.
+            credential_type: Type of credential (e.g., 'access_token', 'password').
+            value: The credential value to store.
 
         Raises:
-            MurError: If saving the access token fails.
+            MurError: If saving the credential fails.
         """
         try:
-            keyring.set_password(self.service_name, 'access_token', access_token)
-            logger.debug('Saved access token to keyring')
+            keyring.set_password(self.service_name, credential_type, value)
+            logger.debug(f'Saved {credential_type} to keyring')
         except Exception as e:
             raise MurError(
                 code=208,
-                message='Failed to save access token',
-                detail='Could not store access token in storage.',
+                message=f'Failed to save {credential_type}',
+                detail=f'Could not store {credential_type} in storage.',
                 original_error=e,
             )
 
-    def load_access_token(self) -> str | None:
-        """Load access token from secure storage.
-
-        Returns:
-            The stored access token if found, None otherwise.
-
-        Raises:
-            MurError: If loading the access token fails.
-        """
-        try:
-            token = keyring.get_password(self.service_name, 'access_token')
-            logger.debug('Retrieved access token from keyring')
-            return token
-        except Exception as e:
-            raise MurError(
-                code=208,
-                message='Failed to load access token',
-                detail='Could not retrieve access token from storage.',
-                original_error=e,
-            )
-
-    def clear_access_token(self) -> None:
-        """Clear stored access token.
-
-        Raises:
-            MurError: If clearing the access token fails.
-        """
-        try:
-            keyring.delete_password(self.service_name, 'access_token')
-            logger.debug('Cleared access token from keyring')
-        except PasswordDeleteError:
-            logger.debug('No access token to clear')
-        except Exception as e:
-            raise MurError(
-                code=208,
-                message='Failed to clear access token',
-                detail='Could not remove access token from storage.',
-                original_error=e,
-            )
-
-    def save_password(self, password: str) -> None:
-        """Save password securely.
+    def load_credential(self, credential_type: str) -> str | None:
+        """Load credential from secure storage.
 
         Args:
-            password: The password string to store.
-
-        Raises:
-            MurError: If saving the password fails.
-        """
-        try:
-            keyring.set_password(self.service_name, 'password', password)
-            logger.debug('Saved password to keyring')
-        except Exception as e:
-            raise MurError(
-                code=208,
-                message='Failed to save password',
-                detail='Could not store password in storage.',
-                original_error=e,
-            )
-
-    def load_password(self) -> str | None:
-        """Load password from secure storage.
+            credential_type: Type of credential to load.
 
         Returns:
-            The stored password if found, None otherwise.
+            The stored credential if found, None otherwise.
 
         Raises:
-            MurError: If loading the password fails.
+            MurError: If loading the credential fails.
         """
         try:
-            password = keyring.get_password(self.service_name, 'password')
-            logger.debug('Retrieved password from keyring')
-            return password
+            value = keyring.get_password(self.service_name, credential_type)
+            logger.debug(f'Retrieved {credential_type} from keyring')
+            return value
         except Exception as e:
             raise MurError(
                 code=208,
-                message='Failed to load password',
-                detail='Could not retrieve password from storage.',
+                message=f'Failed to load {credential_type}',
+                detail=f'Could not retrieve {credential_type} from storage.',
                 original_error=e,
             )
 
-    def clear_password(self) -> None:
-        """Clear stored password.
+    def clear_credential(self, credential_type: str) -> None:
+        """Clear stored credential.
+
+        Args:
+            credential_type: Type of credential to clear.
 
         Raises:
-            MurError: If clearing the password fails.
+            MurError: If clearing the credential fails.
         """
         try:
-            keyring.delete_password(self.service_name, 'password')
-            logger.debug('Cleared password from keyring')
+            keyring.delete_password(self.service_name, credential_type)
+            logger.debug(f'Cleared {credential_type} from keyring')
         except PasswordDeleteError:
-            logger.debug('No password to clear')
+            logger.debug(f'No {credential_type} to clear')
         except Exception as e:
             raise MurError(
                 code=208,
-                message='Failed to clear password',
-                detail='Could not remove password from storage.',
+                message=f'Failed to clear {credential_type}',
+                detail=f'Could not remove {credential_type} from storage.',
                 original_error=e,
             )
