@@ -9,6 +9,7 @@ import click
 from mur.core.auth import AuthenticationManager
 from mur.utils.error_handler import MessageType, MurError
 from mur.commands.base import ArtifactCommand
+from ..core.packaging import normalize_package_name
 
 logger = logging.getLogger(__name__)
 
@@ -19,49 +20,17 @@ class UninstallArtifactCommand(ArtifactCommand):
     Attributes:
         name (str): The name of the artifact to uninstall.
         verbose (bool): Whether to enable verbose logging output.
-        username (str | None): The current user's username for scoped artifacts.
     """
 
-    def __init__(self, name: str | None, verbose: bool = False) -> None:
+    def __init__(self, artifact_name: str | None, verbose: bool = False) -> None:
         """Initialize uninstall command.
 
         Args:
-            name: Name of the artifact to uninstall, or None to uninstall from manifest
+            artifact_name: Name of the artifact to uninstall, or None to uninstall from manifest
             verbose: Whether to enable verbose output
         """
         super().__init__('uninstall', verbose)
-        self.name = name
-        self.username = self.auth_manager.config.get('username')
-
-    def _get_scoped_name(self, artifact_name: str) -> str:
-        """Get the scoped artifact name if username exists.
-
-        Args:
-            artifact_name (str): Original artifact name
-
-        Returns:
-            str: Scoped artifact name if username exists, original name otherwise
-        """
-        if self.username:
-            return f'{self.username}_{artifact_name}'
-        return artifact_name
-
-    def _remove_scope(self, artifact_name: str) -> str:
-        """Remove username scope from artifact name if present.
-
-        Args:
-            artifact_name (str): artifact name that might include username scope
-
-        Returns:
-            str: artifact name with username scope removed if it was present
-        """
-        if not self.username:
-            return artifact_name
-
-        scope_prefix = f'{self.username}_'
-        if artifact_name.startswith(scope_prefix):
-            return artifact_name[len(scope_prefix) :]
-        return artifact_name
+        self.artifact_name = artifact_name
 
     def _get_installed_artifacts(self) -> list[dict[str, str]]:
         """Get list of installed artifacts from pip.
@@ -226,29 +195,8 @@ class UninstallArtifactCommand(ArtifactCommand):
 
             self._uninstall_artifact(artifact_name)
 
-            # If that didn't work and we have a username, try with the scope
-            if self.username and not (
-                artifact_name.startswith(f'{self.username}_')
-                or artifact_name.startswith(f'{self.username}-')
-                or artifact_name.startswith(f'{self.username}.')
-            ):
-                scoped_name = f'{self.username}-{artifact_name}'
-                if self.verbose:
-                    logger.debug(f'Attempting to uninstall with scope: {scoped_name}')
-                self._uninstall_artifact(scoped_name)
-
-            # Always remove any username prefix for init file cleanup
-            unscoped_name = self._remove_scope(
-                artifact_name.replace(f'{self.username}-', '')
-                .replace(f'{self.username}.', '')
-                .replace(f'{self.username}_', '')
-            )
-
-            if self.verbose:
-                logger.debug(f'Cleaning up init files with unscoped name: {unscoped_name}')
-
-            self._remove_from_init_file(unscoped_name, 'agents')
-            self._remove_from_init_file(unscoped_name, 'tools')
+            self._remove_from_init_file(artifact_name, 'agents')
+            self._remove_from_init_file(artifact_name, 'tools')
 
         except Exception as e:
             raise MurError(code=309, message=f'Failed to uninstall {artifact_name}', original_error=e)
@@ -260,10 +208,10 @@ class UninstallArtifactCommand(ArtifactCommand):
             MurError: If the uninstallation process fails.
         """
         try:
-            if self.name:
+            if self.artifact_name:
                 # Single artifact uninstall
-                self._uninstall_single_artifact(self.name)
-                click.echo(click.style(f'Successfully uninstalled {self.name}', fg='green'))
+                self._uninstall_single_artifact(self.artifact_name)
+                click.echo(click.style(f'Successfully uninstalled {self.artifact_name}', fg='green'))
             else:
                 # Bulk uninstall from manifest
                 self._uninstall_from_manifest()
@@ -279,22 +227,22 @@ def uninstall_command() -> click.Command:
     """
 
     @click.command()
-    @click.argument('name', required=False)
+    @click.argument('artifact_name', required=False)
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def uninstall(name: str | None, verbose: bool) -> None:
+    def uninstall(artifact_name: str | None, verbose: bool) -> None:
         """Uninstall a artifact or all artifacts from murmur.yaml.
 
-        If name is provided, uninstalls that specific artifact.
-        If no name is provided, attempts to uninstall all artifacts from murmur.yaml.
+        If artifact_name is provided, uninstalls that specific artifact.
+        If no artifact_name is provided, attempts to uninstall all artifacts from murmur.yaml.
 
         Args:
-            name: Optional name of the artifact to uninstall.
+            artifact_name: Optional name of the artifact to uninstall.
             verbose: Whether to enable verbose output.
 
         Raises:
             MurError: If the uninstallation process fails.
         """
-        cmd = UninstallArtifactCommand(name, verbose)
+        cmd = UninstallArtifactCommand(artifact_name, verbose)
         cmd.execute()
 
     return uninstall

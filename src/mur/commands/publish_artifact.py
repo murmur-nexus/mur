@@ -30,7 +30,7 @@ class PublishCommand(ArtifactCommand):
             MurError: If the artifact type in murmur.yaml is invalid.
         """
         try:
-            super().__init__('publish', verbose, index_url)
+            super().__init__('publish', verbose)
 
             self.scope = None
             
@@ -54,23 +54,6 @@ class PublishCommand(ArtifactCommand):
             if not isinstance(e, MurError):
                 raise MurError(code=100, message=str(e))
             raise
-
-    def _remove_scope(self, artifact_name: str) -> str:
-        """Remove scope from artifact name if present.
-
-        Args:
-            artifact_name (str): artifact name that might include scope
-
-        Returns:
-            str: artifact name with scope removed if it was present
-        """
-        if self.is_private_registry:
-            return artifact_name
-
-        scope_prefix = f'{self.scope}_'
-        if artifact_name.startswith(scope_prefix):
-            return artifact_name[len(scope_prefix):]
-        return artifact_name
 
     def _publish_files(self, dist_dir: Path, artifact_files: list[str]) -> None:
         """Publish built artifact files to registry.
@@ -194,21 +177,6 @@ class PublishCommand(ArtifactCommand):
         except Exception as e:
             self.handle_error(e, f'Failed to publish {self.artifact_type}')
 
-    def _ensure_authenticated(self) -> None:
-        """Ensure the user is authenticated before proceeding.
-        
-        Raises:
-            MurError: If authentication fails
-        """
-        # Get the auth manager from the registry adapter
-        auth_manager = AuthenticationManager.create(verbose=self.verbose)
-        
-        if not auth_manager.is_authenticated():
-            raise MurError(
-                code=508,
-                message="Authentication Required",
-                detail="You must be logged in to publish artifacts. Run 'mur login' first."
-            )
 
 
 def publish_command() -> click.Command:

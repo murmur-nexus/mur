@@ -191,6 +191,23 @@ class ArtifactCommand:
         """
         click.echo(click.style(message, fg='green'))
 
+    def _remove_scope(self, artifact_name: str) -> str:
+        """Remove scope from artifact name if present.
+
+        Args:
+            artifact_name (str): artifact name that might include scope
+
+        Returns:
+            str: artifact name with scope removed if it was present
+        """
+        if self.is_private_registry:
+            return artifact_name
+
+        scope_prefix = f'{self.scope}_'
+        if artifact_name.startswith(scope_prefix):
+            return artifact_name[len(scope_prefix):]
+        return artifact_name
+
     def _configure_yaml(self) -> YAML:
         """Configure YAML parser settings.
 
@@ -233,6 +250,22 @@ class ArtifactCommand:
             message='murmur.yaml manifest not found',
             detail='The murmur.yaml manifest file was not found in the current directory',
         )
+    
+    def _ensure_authenticated(self) -> None:
+        """Ensure the user is authenticated before proceeding.
+        
+        Raises:
+            MurError: If authentication fails
+        """
+        # Get the auth manager from the registry adapter
+        auth_manager = AuthenticationManager.create(verbose=self.verbose)
+        
+        if not auth_manager.is_authenticated():
+            raise MurError(
+                code=508,
+                message="Authentication Required",
+                detail="You must be logged in to publish artifacts. Run 'mur login' first."
+            )
 
     def _load_murmur_yaml_from_artifact(self) -> ArtifactManifest:
         """Load build manifest from murmur-build.yaml.

@@ -127,9 +127,10 @@ class InstallArtifactCommand(ArtifactCommand):
     def _process_package_metadata(self, package_name: str, index_url: str, extra_index_urls: list[str]) -> None:
         """Process package metadata and install dependencies."""
         try:
+            normalized_artifact_name = package_name.replace('_', '-')   
             logger.debug(f'Checking metadata for {package_name} from {index_url}')
-            logger.debug(f'{index_url}/{package_name}/metadata')
-            response = requests.get(f'{index_url}/{package_name}/metadata/', timeout=30)
+            logger.debug(f'{index_url}/{normalized_artifact_name}/metadata')
+            response = requests.get(f'{index_url}/{normalized_artifact_name}/metadata/', timeout=30)
             response.raise_for_status()
             package_info = response.json()
 
@@ -235,23 +236,6 @@ class InstallArtifactCommand(ArtifactCommand):
                 debug_messages=["importlib.util.find_spec('murmur') returned None"],
             )
 
-    def _remove_scope(self, package_name: str) -> str:
-        """Remove username scope from package name if present.
-
-        Args:
-            package_name (str): Package name that might include username scope
-
-        Returns:
-            str: Package name with username scope removed if it was present
-        """
-        if not self.username:
-            return package_name
-
-        scope_prefix = f'{self.username}_'
-        if package_name.startswith(scope_prefix):
-            return package_name[len(scope_prefix) :]
-        return package_name
-
     def _update_init_file(self, package_name: str, artifact_type: str) -> None:
         """Update __init__.py file with import statement.
 
@@ -264,9 +248,7 @@ class InstallArtifactCommand(ArtifactCommand):
         """
         init_path = self._get_murmur_packages_dir(artifact_type) / '__init__.py'
 
-        # Normalize package name to lowercase, replace hyphens with underscores,
-        # and remove username scope if present
-        package_name_pep8 = self._remove_scope(package_name.lower().replace('-', '_'))
+        package_name_pep8 = package_name.lower().replace('-', '_')
 
         import_line = f'from .{package_name_pep8}.main import {package_name_pep8}'
 
@@ -312,9 +294,13 @@ class InstallArtifactCommand(ArtifactCommand):
             # If artifact_type is not provided, try to fetch from metadata
             if fetch_metadata and not artifact_type:
                 index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
-                
+
+                # Denormalize artifact name
+                normalized_artifact_name = artifact_name.replace('_', '-')
+                print(f'Denormalized artifact name: {normalized_artifact_name}')
+
                 try:
-                    response = requests.get(f'{index_url}/{artifact_name}/metadata/', timeout=30)
+                    response = requests.get(f'{index_url}/{normalized_artifact_name}/metadata/', timeout=30)
                     response.raise_for_status()
                     package_info = response.json()
                     artifact_type = package_info.get('artifact_type')
@@ -322,14 +308,14 @@ class InstallArtifactCommand(ArtifactCommand):
                     if not artifact_type:
                         raise MurError(
                             code=606,
-                            message=f"Could not determine artifact type for '{artifact_name}'",
+                            message=f"Could not determine artifact type for '{normalized_artifact_name}'",
                             detail="The artifact metadata doesn't specify a type. Please use 'mur install [agent|tool] [artifact_name]' instead."
                         )
                         
                 except RequestException as e:
                     raise MurError(
                         code=606,
-                        message=f"Metadata not available for '{artifact_name}'",
+                        message=f"Metadata not available for '{normalized_artifact_name}'",
                         detail="The artifact server doesn't support metadata or the artifact doesn't exist. Please use 'mur install [agent|tool] [artifact_name]' instead.",
                         original_error=e,
                     )
@@ -405,11 +391,13 @@ def install_command() -> click.Command:
             
         # Case 2: Two arguments - explicit artifact type and name
         if arg1 in ['agent', 'tool'] and arg2:
+            print(f'Installing 2 args: {arg1} {arg2}')
             cmd._install_single_artifact(arg2, arg1, fetch_metadata=False)
             return
             
         # Case 3: One argument - artifact name only, try to detect type
         if arg1 and not arg2:
+            print(f'Installing 1 arg:{arg1}')
             cmd._install_single_artifact(arg1, None, fetch_metadata=True)
             return
             

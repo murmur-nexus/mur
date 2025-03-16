@@ -485,22 +485,6 @@ class BuildCommand(ArtifactCommand):
         except MurError as e:
             e.handle()
 
-    def _ensure_authenticated(self) -> None:
-        """Ensure the user is authenticated before proceeding.
-        
-        Raises:
-            MurError: If authentication fails
-        """
-        # Get the auth manager from the registry adapter
-        auth_manager = AuthenticationManager.create(verbose=self.verbose)
-        
-        if not auth_manager.is_authenticated():
-            raise MurError(
-                code=508,
-                message="Authentication Required",
-                detail="You must be logged in to publish artifacts. Run 'mur login' first."
-            )
-
 
 def build_command() -> click.Command:
     """Create the build command for Click.

@@ -26,10 +26,11 @@ class PublicRegistryAdapter(RegistryAdapter):
 
     Args:
         verbose (bool, optional): Enable verbose logging. Defaults to False.
+        index_url (str | None, optional): The index URL to use for publishing. Defaults to None.
     """
 
-    def __init__(self, verbose: bool = False):
-        super().__init__(verbose)
+    def __init__(self, verbose: bool = False, index_url: str | None = None):
+        super().__init__(verbose, index_url)
         self.auth_manager = AuthenticationManager.create(verbose=verbose)
         self.api_client = ApiClient(verbose=verbose)
 

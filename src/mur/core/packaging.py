@@ -619,8 +619,8 @@ def is_valid_artifact_name_version(name: str, version: str) -> None:
         raise MurError(
             code=305,
             message=f"Invalid artifact name '{name}'",
-            detail='Name must be lowercase, alphanumeric, and can include dashes or underscores but no spaces or special characters. No leading/trailing non-alphanumeric characters.',
-            debug_messages=['PEP 423: https://peps.python.org/pep-0423/'],
+            detail='Name must be lowercase, alphanumeric, and can include dashes but no underscores, spaces or special characters. No leading/trailing non-alphanumeric characters.',
+            debug_messages=['You may be expecting PEP8 compliance, but this is not applied to murmur. We enforce normalized names for both module and distribution names to keep things simple.'],
         )
 
     # Validate version
