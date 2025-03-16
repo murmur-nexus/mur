@@ -34,6 +34,7 @@ class RegistryAdapter(ABC):
         Args:
             manifest (ArtifactManifest): The artifact manifest containing metadata and file info
             scope (str | None, optional): The scope of the artifact. Defaults to None.
+
         Returns:
             dict[str, Any]: Response data from the registry after publishing
 

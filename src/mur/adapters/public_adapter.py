@@ -1,5 +1,4 @@
 import configparser
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -7,9 +6,9 @@ from typing import Any
 import requests
 from requests.exceptions import RequestException
 
+from ..core.api_client import ApiClient
 from ..core.auth import AuthenticationManager
 from ..core.packaging import ArtifactManifest
-from ..core.api_client import ApiClient
 from ..utils.constants import GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
 from ..utils.models import ArtifactPublishRequest, ArtifactPublishResponse
@@ -33,6 +32,7 @@ class PublicRegistryAdapter(RegistryAdapter):
         super().__init__(verbose, index_url)
         self.auth_manager = AuthenticationManager.create(verbose=verbose)
         self.api_client = ApiClient(verbose=verbose)
+        self.base_url = self.api_client.base_url
 
     def publish_artifact(
         self,
@@ -43,6 +43,7 @@ class PublicRegistryAdapter(RegistryAdapter):
 
         Args:
             manifest (ArtifactManifest): The artifact manifest containing metadata and file info
+            scope (str | None, optional): The scope to publish the artifact under. Defaults to None.
 
         Returns:
             dict[str, Any]: Server response containing artifact details.
@@ -61,24 +62,21 @@ class PublicRegistryAdapter(RegistryAdapter):
                 payload.name = f'{scope}-{payload.name}'
             else:
                 raise MurError(502, 'Scope is required for public registry')
-            
+
             if self.verbose:
                 logger.debug(f'Publishing payload: {payload.model_dump(exclude_none=True)}')
-            
+
             # Get authentication headers
             headers = self._get_headers()
-            
+
             # Make API request
             response = self.api_client.post(
-                endpoint="/artifacts",
-                payload=payload,
-                response_model=ArtifactPublishResponse,
-                headers=headers
+                endpoint='/artifacts', payload=payload, response_model=ArtifactPublishResponse, headers=headers
             )
-            
+
             if response.status_code != 200:
-                self._handle_error_response(response.status_code, response.error or "Unknown error")
-            
+                self._handle_error_response(response.status_code, response.error or 'Unknown error')
+
             return response.raw_data
 
         except RequestException as e:
@@ -200,18 +198,21 @@ class PublicRegistryAdapter(RegistryAdapter):
             # Get the path to the .murmurrc file
             local_murmurrc = Path.cwd() / '.murmurrc'
             murmurrc_path = local_murmurrc if local_murmurrc.exists() else GLOBAL_MURMURRC_PATH
-            
+
             config = configparser.ConfigParser()
             config.read(murmurrc_path)
+            extra_indexes: list[str] = []
 
             # Add extra index URLs from config if present
             if config.has_option('murmur-nexus', 'extra-index-url'):
                 extra_urls = config.get('murmur-nexus', 'extra-index-url')
                 extra_indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
 
-            indexes = [self.index_url]
+            # Ensure index_url is a string before adding to indexes
+            primary_index = self.index_url if self.index_url is not None else ''
+            indexes = [primary_index]
             indexes.extend(extra_indexes)
-            
+
             return indexes
 
         except Exception as e:

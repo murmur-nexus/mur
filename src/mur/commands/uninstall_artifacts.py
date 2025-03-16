@@ -6,9 +6,9 @@ from pathlib import Path
 
 import click
 
-from mur.core.auth import AuthenticationManager
-from mur.utils.error_handler import MessageType, MurError
 from mur.commands.base import ArtifactCommand
+from mur.utils.error_handler import MessageType, MurError
+
 from ..core.packaging import normalize_package_name
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,7 @@ class UninstallArtifactCommand(ArtifactCommand):
         """Uninstall all artifacts specified in murmur.yaml."""
         try:
             manifest = self._load_murmur_yaml_from_current_dir()
-            
+
             # Uninstall agents
             for agent in manifest.get('agents', []):
                 try:

@@ -1,3 +1,4 @@
+import importlib.metadata
 import importlib.util
 import logging
 import subprocess
@@ -8,9 +9,7 @@ from pathlib import Path
 import click
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError, RequestException, Timeout
-import importlib.metadata
 
-from ..core.auth import AuthenticationManager
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
 from .base import ArtifactCommand
@@ -68,10 +67,10 @@ class InstallArtifactCommand(ArtifactCommand):
         """Install a package using pip with configured index URLs."""
         try:
             package_spec = package_name if version.lower() in ['latest', ''] else f'{package_name}=={version}'
-            
+
             # Check if package is already installed
             if self._is_package_installed(package_name, version):
-                logger.info(f"Skipping {package_spec} - already installed")
+                logger.info(f'Skipping {package_spec} - already installed')
                 return
 
             index_url, extra_index_urls = self._get_index_urls_from_murmurrc(self.murmurrc_path)
@@ -127,7 +126,7 @@ class InstallArtifactCommand(ArtifactCommand):
     def _process_package_metadata(self, package_name: str, index_url: str, extra_index_urls: list[str]) -> None:
         """Process package metadata and install dependencies."""
         try:
-            normalized_artifact_name = package_name.replace('_', '-')   
+            normalized_artifact_name = package_name.replace('_', '-')
             logger.debug(f'Checking metadata for {package_name} from {index_url}')
             logger.debug(f'{index_url}/{normalized_artifact_name}/metadata')
             response = requests.get(f'{index_url}/{normalized_artifact_name}/metadata/', timeout=30)
@@ -282,7 +281,9 @@ class InstallArtifactCommand(ArtifactCommand):
             if artifact_type == 'agents' and (tools := artifact.get('tools', [])):
                 self._install_artifact_group(tools, 'tools')
 
-    def _install_single_artifact(self, artifact_name: str, artifact_type: str | None, fetch_metadata: bool = False) -> None:
+    def _install_single_artifact(
+        self, artifact_name: str, artifact_type: str | None, fetch_metadata: bool = False
+    ) -> None:
         """Install a single artifact.
 
         Args:
@@ -304,14 +305,14 @@ class InstallArtifactCommand(ArtifactCommand):
                     response.raise_for_status()
                     package_info = response.json()
                     artifact_type = package_info.get('artifact_type')
-                    
+
                     if not artifact_type:
                         raise MurError(
                             code=606,
                             message=f"Could not determine artifact type for '{normalized_artifact_name}'",
-                            detail="The artifact metadata doesn't specify a type. Please use 'mur install [agent|tool] [artifact_name]' instead."
+                            detail="The artifact metadata doesn't specify a type. Please use 'mur install [agent|tool] [artifact_name]' instead.",
                         )
-                        
+
                 except RequestException as e:
                     raise MurError(
                         code=606,
@@ -319,21 +320,21 @@ class InstallArtifactCommand(ArtifactCommand):
                         detail="The artifact server doesn't support metadata or the artifact doesn't exist. Please use 'mur install [agent|tool] [artifact_name]' instead.",
                         original_error=e,
                     )
-            
+
             if not artifact_type:
                 raise MurError(
                     code=104,
-                    message="Missing artifact type",
-                    detail="Please specify the artifact type: 'mur install [agent|tool] [artifact_name]"
+                    message='Missing artifact type',
+                    detail="Please specify the artifact type: 'mur install [agent|tool] [artifact_name]",
                 )
-                
+
             # Normalize artifact type (singular to plural)
-            artifact_type_plural = f"{artifact_type}s"
-            
+            artifact_type_plural = f'{artifact_type}s'
+
             # Install the artifact with latest version
             self._install_artifact(artifact_name, 'latest')
             self._update_init_file(artifact_name, artifact_type_plural)
-            
+
             self.log_success(f"Successfully installed {artifact_type} '{artifact_name}'")
 
         except Exception as e:
@@ -374,7 +375,7 @@ def install_command() -> click.Command:
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
     def install(arg1: str | None, arg2: str | None, verbose: bool) -> None:
         """Install artifacts from murmur.yaml or a specific artifact.
-        
+
         Usage patterns:
         - mur install                      # Install all artifacts from murmur.yaml
         - mur install my-artifact          # Install artifact with auto-detected type
@@ -383,29 +384,29 @@ def install_command() -> click.Command:
         """
         cmd = InstallArtifactCommand(verbose)
         cmd._murmur_must_be_installed()
-        
+
         # Case 1: No arguments - install from manifest
         if not arg1:
             cmd.execute()
             return
-            
+
         # Case 2: Two arguments - explicit artifact type and name
         if arg1 in ['agent', 'tool'] and arg2:
             print(f'Installing 2 args: {arg1} {arg2}')
             cmd._install_single_artifact(arg2, arg1, fetch_metadata=False)
             return
-            
+
         # Case 3: One argument - artifact name only, try to detect type
         if arg1 and not arg2:
             print(f'Installing 1 arg:{arg1}')
             cmd._install_single_artifact(arg1, None, fetch_metadata=True)
             return
-            
+
         # Case 4: Invalid usage
         raise MurError(
             code=101,
-            message="Invalid command usage",
-            detail="Usage: mur install [artifact_name] or mur install [agent|tool] [artifact_name]"
+            message='Invalid command usage',
+            detail='Usage: mur install [artifact_name] or mur install [agent|tool] [artifact_name]',
         )
 
     return install

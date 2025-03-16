@@ -3,18 +3,17 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import ClassVar
 
 import click
 from ruamel.yaml import YAML
 
-from ..adapters.adapter_factory import get_registry_adapter, get_index_url_from_config
+from ..adapters.adapter_factory import get_index_url_from_config, get_registry_adapter
+from ..adapters.private_adapter import PrivateRegistryAdapter
 from ..core.auth import AuthenticationManager
-from ..core.config import ConfigManager
 from ..core.packaging import ArtifactManifest, normalize_package_name
 from ..utils.constants import DEFAULT_MURMUR_EXTRA_INDEX_URLS, DEFAULT_MURMUR_INDEX_URL, GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
-from ..adapters.private_adapter import PrivateRegistryAdapter
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,49 +33,50 @@ class ArtifactCommand:
         """
         # Add debug logging to track initialization
         logger.debug(f"Initializing ArtifactCommand for '{command_name}' (id: {id(self)})")
-        
+
         # Mark as initialized to prevent double initialization
         self._initialized = True
-        
+
         self.command_name = command_name
         self.verbose = verbose
+        self.scope: str | None = None
 
         # Initialize yaml and paths
         self.current_dir = self.get_current_dir()
         self.yaml = self._configure_yaml()
         self.murmurrc_path = self._get_murmurrc_path()
-        
+
         # Follow the registry adapter flow
         self.registry_adapter = get_registry_adapter(self.murmurrc_path, self.command_name, self.verbose)
         self.is_private_registry = isinstance(self.registry_adapter, PrivateRegistryAdapter)
         self.index_url = get_index_url_from_config(self.murmurrc_path, self.verbose)
-            
+
     def _get_murmurrc_path(self) -> Path:
         """Get the path to the .murmurrc file to use.
-        
+
         Checks for a local .murmurrc in the current directory first,
         then falls back to the global one in the user's home directory.
-        
+
         Args:
             verbose: Whether to enable verbose logging
-        
+
         Returns:
             Path: Path to the .murmurrc file to use
         """
         current_dir = Path.cwd()
         local_murmurrc = current_dir / '.murmurrc'
-        
+
         if local_murmurrc.exists():
             if self.verbose:
-                logger.info(f"Using local configuration from {local_murmurrc}")
+                logger.info(f'Using local configuration from {local_murmurrc}')
             return local_murmurrc
-        
+
         if self.verbose:
-            logger.info(f"Using global configuration from {GLOBAL_MURMURRC_PATH}")
+            logger.info(f'Using global configuration from {GLOBAL_MURMURRC_PATH}')
 
         if not GLOBAL_MURMURRC_PATH.exists():
             if self.verbose:
-                logger.info("Global .murmurrc not found, you must be new around here!")
+                logger.info('Global .murmurrc not found, you must be new around here!')
                 logger.info("Running 'mur config init --global' with default settings")
             self._init_default_global_murmurrc()
 
@@ -84,13 +84,13 @@ class ArtifactCommand:
 
     def _init_default_global_murmurrc(self) -> None:
         """Initialize a default global .murmurrc file.
-        
+
         This method is used to create a default configuration when none exists.
         It's a simplified version of ConfigCommand.init_config to avoid circular imports.
         """
         try:
             config_path = GLOBAL_MURMURRC_PATH
-            
+
             # Create parent directories if they don't exist
             config_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -98,21 +98,17 @@ class ArtifactCommand:
             config = configparser.ConfigParser()
             config['murmur-nexus'] = {
                 'index-url': DEFAULT_MURMUR_INDEX_URL,
-                'extra-index-url': ' '.join(DEFAULT_MURMUR_EXTRA_INDEX_URLS)
+                'extra-index-url': ' '.join(DEFAULT_MURMUR_EXTRA_INDEX_URLS),
             }
 
             with open(config_path, 'w') as f:
                 config.write(f)
-                
+
             if self.verbose:
-                logger.info(f"Created global .murmurrc at: {config_path}")
+                logger.info(f'Created global .murmurrc at: {config_path}')
 
         except Exception as e:
-            raise MurError(
-                code=405,
-                message="Failed to create global .murmurrc",
-                original_error=e
-            )
+            raise MurError(code=405, message='Failed to create global .murmurrc', original_error=e)
 
     def _get_index_urls_from_murmurrc(self, murmurrc_path: str | Path) -> tuple[str, list[str]]:
         """Get index URLs from .murmurrc file.
@@ -205,7 +201,7 @@ class ArtifactCommand:
 
         scope_prefix = f'{self.scope}_'
         if artifact_name.startswith(scope_prefix):
-            return artifact_name[len(scope_prefix):]
+            return artifact_name[len(scope_prefix) :]
         return artifact_name
 
     def _configure_yaml(self) -> YAML:
@@ -250,21 +246,21 @@ class ArtifactCommand:
             message='murmur.yaml manifest not found',
             detail='The murmur.yaml manifest file was not found in the current directory',
         )
-    
+
     def _ensure_authenticated(self) -> None:
         """Ensure the user is authenticated before proceeding.
-        
+
         Raises:
             MurError: If authentication fails
         """
         # Get the auth manager from the registry adapter
         auth_manager = AuthenticationManager.create(verbose=self.verbose)
-        
+
         if not auth_manager.is_authenticated():
             raise MurError(
                 code=508,
-                message="Authentication Required",
-                detail="You must be logged in to publish artifacts. Run 'mur login' first."
+                message='Authentication Required',
+                detail="You must be logged in to publish artifacts. Run 'mur login' first.",
             )
 
     def _load_murmur_yaml_from_artifact(self) -> ArtifactManifest:

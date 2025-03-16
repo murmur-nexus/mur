@@ -9,9 +9,9 @@ from twine.settings import Settings
 from mur.core.packaging import ArtifactManifest
 
 from ..utils.constants import (
+    GLOBAL_MURMURRC_PATH,
     PYPI_PASSWORD,
     PYPI_USERNAME,
-    GLOBAL_MURMURRC_PATH,
 )
 from ..utils.error_handler import MurError
 from .base_adapter import RegistryAdapter
@@ -57,6 +57,10 @@ class PrivateRegistryAdapter(RegistryAdapter):
         """
         try:
             logger.debug(f'Publishing artifact: {manifest.to_dict()}')
+
+            # Check if index_url is None before using string methods
+            if self.index_url is None:
+                raise MurError(213, 'No private registry URL configured')
 
             repository_url = self.index_url.rstrip('/').replace('/simple', '')
             response = {
@@ -124,15 +128,19 @@ class PrivateRegistryAdapter(RegistryAdapter):
             # Get the path to the .murmurrc file
             local_murmurrc = Path.cwd() / '.murmurrc'
             murmurrc_path = local_murmurrc if local_murmurrc.exists() else GLOBAL_MURMURRC_PATH
-            
+
             config = configparser.ConfigParser()
             config.read(murmurrc_path)
 
             # Add extra index URLs from config if present
-            extra_indexes = []
+            extra_indexes: list[str] = []
             if config.has_option('murmur-nexus', 'extra-index-url'):
                 extra_urls = config.get('murmur-nexus', 'extra-index-url')
                 extra_indexes.extend(url.strip() for url in extra_urls.split('\n') if url.strip())
+
+            # Ensure index_url is not None before adding it to the list
+            if self.index_url is None:
+                raise MurError(807, 'No private registry URL configured')
 
             indexes = [self.index_url]
             indexes.extend(extra_indexes)

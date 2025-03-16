@@ -5,17 +5,18 @@ from typing import Optional
 
 import click
 
+from ..utils.constants import DEFAULT_MURMUR_EXTRA_INDEX_URLS, DEFAULT_MURMUR_INDEX_URL, GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
-from ..utils.constants import GLOBAL_MURMURRC_PATH, DEFAULT_MURMUR_INDEX_URL, DEFAULT_MURMUR_EXTRA_INDEX_URLS
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
 
 MAIN_CONFIG_SECTION = 'murmur-nexus'
 
+
 class ConfigCommand(ArtifactCommand):
     """Manages Murmur configuration settings.
-    
+
     Handles setting, getting, listing and unsetting configuration values
     in both global and local scopes using .murmurrc files.
     Local settings take precedence when present.
@@ -34,8 +35,8 @@ class ConfigCommand(ArtifactCommand):
             global_config_path (Path): Path to global .murmurrc file
             local_config_path (Path): Path to local .murmurrc in current directory
         """
-        super().__init__('config', verbose) 
-        
+        super().__init__('config', verbose)
+
         # Initialize path
         self.global_config_path = GLOBAL_MURMURRC_PATH
         self.local_config_path = Path.cwd() / '.murmurrc'
@@ -74,23 +75,19 @@ class ConfigCommand(ArtifactCommand):
             # Determine which config to use
             use_local = self.local_config_path.exists() and not use_global
             config_path = self.local_config_path if use_local else self.global_config_path
-            scope = "local" if use_local else "global"
-            
+            scope = 'local' if use_local else 'global'
+
             config_path.parent.mkdir(parents=True, exist_ok=True)
             config = self._load_config(config_path)
             config[MAIN_CONFIG_SECTION][key] = value
-            
+
             with open(config_path, 'w') as f:
                 config.write(f)
-                
-            self.log_success(f"Set {key}={value} in {scope} .murmurrc")
-            
+
+            self.log_success(f'Set {key}={value} in {scope} .murmurrc')
+
         except Exception as e:
-            raise MurError(
-                code=401,
-                message=f"Failed to set {key} in configuration",
-                original_error=e
-            )
+            raise MurError(code=401, message=f'Failed to set {key} in configuration', original_error=e)
 
     def get_config(self, key: str) -> Optional[str]:
         """Get configuration value.
@@ -109,7 +106,7 @@ class ConfigCommand(ArtifactCommand):
                 local_config = self._load_config(self.local_config_path)
                 if key in local_config[MAIN_CONFIG_SECTION]:
                     value = local_config[MAIN_CONFIG_SECTION][key]
-                    click.echo(f"{key}: {value} (local)")
+                    click.echo(f'{key}: {value} (local)')
                     return value
 
             # Fall back to global
@@ -117,18 +114,14 @@ class ConfigCommand(ArtifactCommand):
                 global_config = self._load_config(self.global_config_path)
                 if key in global_config[MAIN_CONFIG_SECTION]:
                     value = global_config[MAIN_CONFIG_SECTION][key]
-                    click.echo(f"{key}: {value} (global)")
+                    click.echo(f'{key}: {value} (global)')
                     return value
 
             click.echo(f"Configuration key '{key}' not found in local or global .murmurrc")
             return None
 
         except Exception as e:
-            raise MurError(
-                code=402,
-                message=f"Failed to get configuration for {key}",
-                original_error=e
-            )
+            raise MurError(code=402, message=f'Failed to get configuration for {key}', original_error=e)
 
     def list_config(self) -> None:
         """List all configuration values.
@@ -143,27 +136,23 @@ class ConfigCommand(ArtifactCommand):
 
             # Display global settings
             if global_config[MAIN_CONFIG_SECTION]:
-                click.echo("\nGlobal settings (.murmurrc):")
-                click.echo(f"Path: {self.global_config_path}")
+                click.echo('\nGlobal settings (.murmurrc):')
+                click.echo(f'Path: {self.global_config_path}')
                 for key, value in global_config[MAIN_CONFIG_SECTION].items():
-                    click.echo(f"{key}: {value}")
+                    click.echo(f'{key}: {value}')
 
             # Display local settings
             if local_config[MAIN_CONFIG_SECTION]:
-                click.echo("\nLocal settings (.murmurrc):")
-                click.echo(f"Path: {self.local_config_path}")
+                click.echo('\nLocal settings (.murmurrc):')
+                click.echo(f'Path: {self.local_config_path}')
                 for key, value in local_config[MAIN_CONFIG_SECTION].items():
-                    click.echo(f"{key}: {value}")
+                    click.echo(f'{key}: {value}')
 
             if not (global_config[MAIN_CONFIG_SECTION] or local_config[MAIN_CONFIG_SECTION]):
-                click.echo("No configuration values found")
+                click.echo('No configuration values found')
 
         except Exception as e:
-            raise MurError(
-                code=403,
-                message="Failed to list configurations",
-                original_error=e
-            )
+            raise MurError(code=403, message='Failed to list configurations', original_error=e)
 
     def unset_config(self, key: str, use_global: bool = False) -> None:
         """Unset configuration value.
@@ -179,7 +168,7 @@ class ConfigCommand(ArtifactCommand):
             # Determine which config to use
             use_local = self.local_config_path.exists() and not use_global
             config_path = self.local_config_path if use_local else self.global_config_path
-            scope = "local" if use_local else "global"
+            scope = 'local' if use_local else 'global'
 
             if config_path.exists():
                 config = self._load_config(config_path)
@@ -187,17 +176,13 @@ class ConfigCommand(ArtifactCommand):
                     del config[MAIN_CONFIG_SECTION][key]
                     with open(config_path, 'w') as f:
                         config.write(f)
-                    self.log_success(f"Removed {key} from {scope} .murmurrc")
+                    self.log_success(f'Removed {key} from {scope} .murmurrc')
                     return
 
             click.echo(f"Configuration key '{key}' not found in {scope} .murmurrc")
 
         except Exception as e:
-            raise MurError(
-                code=404,
-                message=f"Failed to unset configuration for {key}",
-                original_error=e
-            )
+            raise MurError(code=404, message=f'Failed to unset configuration for {key}', original_error=e)
 
     def init_config(self, use_global: bool = False) -> None:
         """Initialize a new .murmurrc file.
@@ -210,11 +195,11 @@ class ConfigCommand(ArtifactCommand):
         """
         try:
             config_path = self.global_config_path if use_global else self.local_config_path
-            scope = "global" if use_global else "local"
+            scope = 'global' if use_global else 'local'
             alt_path = self.local_config_path if use_global else self.global_config_path
 
             if config_path.exists():
-                message = f"{scope.capitalize()} .murmurrc already exists at: {config_path}"
+                message = f'{scope.capitalize()} .murmurrc already exists at: {config_path}'
                 # Only show alternative if it doesn't exist
                 if not alt_path.exists():
                     message += (
@@ -231,13 +216,13 @@ class ConfigCommand(ArtifactCommand):
             config = configparser.ConfigParser()
             config[MAIN_CONFIG_SECTION] = {
                 'index-url': DEFAULT_MURMUR_INDEX_URL,
-                'extra-index-url': ' '.join(DEFAULT_MURMUR_EXTRA_INDEX_URLS)
+                'extra-index-url': ' '.join(DEFAULT_MURMUR_EXTRA_INDEX_URLS),
             }
 
             with open(config_path, 'w') as f:
                 config.write(f)
 
-            message = f"Created {scope} .murmurrc at: {config_path}"
+            message = f'Created {scope} .murmurrc at: {config_path}'
             # Only show alternative if it doesn't exist
             if not alt_path.exists():
                 message += (
@@ -247,11 +232,7 @@ class ConfigCommand(ArtifactCommand):
             self.log_success(message)
 
         except Exception as e:
-            raise MurError(
-                code=405,
-                message=f"Failed to create {scope} .murmurrc",
-                original_error=e
-            )
+            raise MurError(code=405, message=f'Failed to create {scope} .murmurrc', original_error=e)
 
 
 def config_command() -> click.Group:
@@ -260,6 +241,7 @@ def config_command() -> click.Group:
     Returns:
         Click command group for managing configurations
     """
+
     @click.group()
     def config() -> None:
         """Manage Murmur configuration settings."""
@@ -304,7 +286,7 @@ def config_command() -> click.Group:
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
     def init(use_global: bool, verbose: bool) -> None:
         """Initialize a new .murmurrc file.
-        
+
         Creates a new configuration file with default settings. By default creates
         a local .murmurrc in the current directory. Use --global to create in the
         user's home directory instead.

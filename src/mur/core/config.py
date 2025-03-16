@@ -11,13 +11,13 @@ from ..utils.error_handler import MessageType, MurError
 logger = logging.getLogger(__name__)
 
 # Determine the base configuration directory following XDG standard
-XDG_CONFIG_HOME = Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config"))
-MURMUR_CONFIG_DIR = XDG_CONFIG_HOME / "murmur"
-DEFAULT_CONFIG_FILE = MURMUR_CONFIG_DIR / "config.json"
+XDG_CONFIG_HOME = Path(os.getenv('XDG_CONFIG_HOME', Path.home() / '.config'))
+MURMUR_CONFIG_DIR = XDG_CONFIG_HOME / 'murmur'
+DEFAULT_CONFIG_FILE = MURMUR_CONFIG_DIR / 'config.json'
 
 # Get the XDG cache path or fallback to `~/.cache/murmur/`
-XDG_CACHE_HOME = Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache"))
-MURMUR_CACHE_DIR = XDG_CACHE_HOME / "murmur"
+XDG_CACHE_HOME = Path(os.getenv('XDG_CACHE_HOME', Path.home() / '.cache'))
+MURMUR_CACHE_DIR = XDG_CACHE_HOME / 'murmur'
 
 ConfigDict = dict[str, str | int | bool | None]
 
@@ -47,7 +47,7 @@ class ConfigManager:
 
     def __init__(self, config_file: Path | str = DEFAULT_CONFIG_FILE) -> None:
         """Initialize the configuration manager.
-        
+
         Args:
             config_file: Path to the configuration file
         """
@@ -57,13 +57,13 @@ class ConfigManager:
 
         self.config_file = Path(config_file)
         self.config: ConfigDict = {'cache_dir': str(MURMUR_CACHE_DIR), 'default_timeout': DEFAULT_TIMEOUT}
-        
+
         # Ensure XDG directories and default config file exist
         self._ensure_xdg_directories()
-        
+
         # Load config (which now always exists)
         self._load_config()
-        
+
         self._initialized = True
 
     @classmethod
@@ -71,27 +71,27 @@ class ConfigManager:
         """Reset the singleton instance (primarily for testing)."""
         with cls._lock:
             cls._instance = None
-            
+
     def _ensure_xdg_directories(self) -> None:
         """Ensure that the config and cache directories exist following XDG standards.
-        
+
         Also creates a default config file if it doesn't exist.
         """
         # Ensure config directory exists
         MURMUR_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        
+
         # Ensure cache directory exists
         MURMUR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        
+
         # Create default config file if it doesn't exist
         if not self.config_file.exists():
-            logger.debug(f"Config file {self.config_file} not found, creating with default values")
+            logger.debug(f'Config file {self.config_file} not found, creating with default values')
             with open(self.config_file, 'w') as f:
                 json.dump(self.config, f, indent=4)
-            logger.debug(f"Created default config file at {self.config_file}")
-        
-        logger.debug(f"Ensured config directory at: {MURMUR_CONFIG_DIR}")
-        logger.debug(f"Ensured cache directory at: {MURMUR_CACHE_DIR}")
+            logger.debug(f'Created default config file at {self.config_file}')
+
+        logger.debug(f'Ensured config directory at: {MURMUR_CONFIG_DIR}')
+        logger.debug(f'Ensured cache directory at: {MURMUR_CACHE_DIR}')
 
     def _load_config(self) -> None:
         """Load configuration from file."""
@@ -156,10 +156,15 @@ class ConfigManager:
 
     def get_cache_dir(self) -> Path:
         """Get the path to the cache directory.
-        
+
         Returns:
             Path: The path to the cache directory.
         """
-        cache_dir = Path(self.config.get('cache_dir', MURMUR_CACHE_DIR))
+        cache_dir_value = self.config.get('cache_dir')
+        # Ensure we have a valid string path
+        if cache_dir_value is None or not isinstance(cache_dir_value, (str, os.PathLike)):
+            cache_dir = MURMUR_CACHE_DIR
+        else:
+            cache_dir = Path(cache_dir_value)
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir

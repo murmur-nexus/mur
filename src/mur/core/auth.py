@@ -1,14 +1,13 @@
 import logging
 
 import click
-from pydantic import BaseModel
 
-from ..utils.constants import DEFAULT_TIMEOUT, MURMUR_SERVER_URL
+from ..utils.constants import MURMUR_SERVER_URL
 from ..utils.error_handler import MurError
+from ..utils.models import AccountListResponse, LoginRequest, LoginResponse, UserConfig
+from .api_client import ApiClient
 from .cache import CredentialCache
 from .config import ConfigManager
-from .api_client import ApiClient
-from ..utils.models import LoginRequest, LoginResponse, UserConfig, AccountListResponse
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +123,7 @@ class AuthenticationManager:
 
         Returns:
             str | None: Access token if authentication successful, None otherwise
-            
+
         Note:
             On successful authentication, credentials are automatically cached.
 
@@ -133,28 +132,24 @@ class AuthenticationManager:
         """
         try:
             login_payload = LoginRequest(username=username, password=password)
-            
+
             response = self.api_client.post(
-                endpoint="/auth/login",
+                endpoint='/auth/login',
                 payload=login_payload,
                 response_model=LoginResponse,
-                query_params={"grant_type": "password"},
-                content_type="application/x-www-form-urlencoded"
+                query_params={'grant_type': 'password'},
+                content_type='application/x-www-form-urlencoded',
             )
-            
+
             if response.status_code == 200 and response.data:
                 logger.debug(f'Access token: {response.data.access_token}')
-                
+
                 if not response.data.user:
-                    raise MurError(code=507, message="Missing User Data", detail="Missing user data in response")
-                
+                    raise MurError(code=507, message='Missing User Data', detail='Missing user data in response')
+
                 # User is already a UserConfig object, no need to create a new one
                 self._save_user_session(response.data.user)
-                self._save_credentials(
-                    password, 
-                    response.data.access_token, 
-                    response.data.refresh_token
-                )
+                self._save_credentials(password, response.data.access_token, response.data.refresh_token)
                 return response.data.access_token
 
             return None
@@ -175,7 +170,7 @@ class AuthenticationManager:
         try:
             # Get the current config from the manager and update it
             config = self.config_manager.config
-            
+
             # Since user is already a UserConfig object, we can directly use it
             config.update(user.model_dump(exclude_none=True))
 
@@ -265,23 +260,23 @@ class AuthenticationManager:
             self.cache.clear_credential('access_token')
             self.cache.clear_credential('refresh_token')
             self.cache.clear_credential('password')
-            
+
             # Clear user data from config using UserConfig model fields
             user_keys = list(UserConfig.model_fields.keys())
-            
+
             for key in user_keys:
                 if key in self.config_manager.config:
                     self.config_manager.config.pop(key, None)
 
             # Clear user_accounts from config
             self.config_manager.config.pop('user_accounts', None)
-            
+
             # Save the updated config
             self.config_manager.save_config()
-            
+
             # Update our local copy
             self.config = self.config_manager.get_config()
-            
+
             logger.debug(f'Cleared all credentials and user data fields: {user_keys}')
         except MurError:
             raise
@@ -313,7 +308,7 @@ class AuthenticationManager:
 
     def is_authenticated(self) -> bool:
         """Check if the user is currently authenticated.
-        
+
         Returns:
             bool: True if the user has valid credentials, False otherwise
         """
@@ -323,24 +318,24 @@ class AuthenticationManager:
             access_token = self.cache.load_credential('access_token')
             if access_token and self._validate_token(access_token):
                 return True
-            
+
             # Check if we have cached credentials
             username = self.config.get('username')
             password = self.cache.load_credential('password')
-            
+
             # Consider the user authenticated if both username and password are present
             return bool(username and password)
-        
+
         except Exception:
-            logger.debug("Error checking authentication status", exc_info=True)
+            logger.debug('Error checking authentication status', exc_info=True)
             return False
 
     def fetch_user_accounts(self) -> list[str]:
         """Fetch user accounts and store their names in configuration.
-        
+
         Returns:
             list[str]: List of account names
-            
+
         Raises:
             MurError: If fetching accounts fails
         """
@@ -348,64 +343,54 @@ class AuthenticationManager:
             # Get user ID from config
             user_id = self.config.get('id')
             if not user_id:
-                logger.debug("Missing user ID, cannot fetch accounts")
-                raise MurError(
-                    code=507,
-                    message="Missing User Data",
-                    detail="User ID is required to fetch accounts"
-                )
-            
+                logger.debug('Missing user ID, cannot fetch accounts')
+                raise MurError(code=507, message='Missing User Data', detail='User ID is required to fetch accounts')
+
             # Get access token from the current session
             access_token = self.cache.load_credential('access_token')
             if not access_token:
-                logger.debug("Missing access token, cannot fetch accounts")
+                logger.debug('Missing access token, cannot fetch accounts')
                 raise MurError(
-                    code=507,
-                    message="Missing User Data",
-                    detail="Access token is required to fetch accounts"
+                    code=507, message='Missing User Data', detail='Access token is required to fetch accounts'
                 )
-            
+
             response = self.api_client.get(
-                endpoint=f"/users/{user_id}/accounts",
-                headers={"Authorization": f"Bearer {access_token}"},
-                response_model=AccountListResponse
+                endpoint=f'/users/{user_id}/accounts',
+                headers={'Authorization': f'Bearer {access_token}'},
+                response_model=AccountListResponse,
             )
-            
+
             if response.status_code != 200 or not response.data:
-                logger.debug(f"Failed to fetch accounts: {response.status_code}")
+                logger.debug(f'Failed to fetch accounts: {response.status_code}')
                 raise MurError(
                     code=507,
-                    message="Failed to fetch user accounts",
-                    detail=f"Server returned status code {response.status_code}"
+                    message='Failed to fetch user accounts',
+                    detail=f'Server returned status code {response.status_code}',
                 )
-            
+
             # Extract account names from the list of Account objects
             account_names = [account.name for account in response.data]
-            
+
             # Save account names to config
             self._save_user_accounts(account_names)
-            
-            logger.debug(f"Saved user accounts: {account_names}")
+
+            logger.debug(f'Saved user accounts: {account_names}')
             return account_names
-            
+
         except MurError:
             raise
         except Exception as e:
-            logger.debug(f"Error fetching user accounts: {e}")
-            raise MurError(
-                code=507,
-                message="Failed to fetch user accounts",
-                original_error=e
-            )
-        
+            logger.debug(f'Error fetching user accounts: {e}')
+            raise MurError(code=507, message='Failed to fetch user accounts', original_error=e)
+
     def _save_user_accounts(self, account_names: list[str]) -> None:
         """Save user accounts to configuration.
-        
+
         Args:
             account_names: List of account names to save
         """
-        self.config_manager.config["user_accounts"] = account_names
+        self.config_manager.config['user_accounts'] = account_names  # type: ignore
         self.config_manager.save_config()
-        
+
         # Update local config
         self.config = self.config_manager.get_config()

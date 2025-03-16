@@ -3,14 +3,11 @@ import shutil
 from pathlib import Path
 
 import click
-from ruamel.yaml import YAML
 
-from ..core.auth import AuthenticationManager
 from ..core.config import ConfigManager
 from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_package_name
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
-from ..utils.constants import DEFAULT_MURMUR_INDEX_URL
 from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
@@ -44,10 +41,10 @@ class BuildCommand(ArtifactCommand):
             super().__init__('build', verbose)
             self.verbose = verbose
             self.scope = None
-            
+
             # Load and validate manifest
             self.build_manifest = self._load_build_manifest()
-            self.artifact_type = self._validate_artifact_type(self.build_manifest.get('type'))
+            self.artifact_type = self._validate_artifact_type(self.build_manifest.get('type', ''))
 
             if not self.is_private_registry:
                 self._ensure_authenticated()
@@ -60,52 +57,48 @@ class BuildCommand(ArtifactCommand):
 
     def _set_scope_from_accounts(self) -> None:
         """Set scope from user accounts.
-        
+
         Loads user accounts from config and prompts user to select one if multiple exist.
-        
+
         Raises:
             MurError: If no user accounts are found or if loading fails
         """
         try:
             config_manager = ConfigManager()
             config = config_manager.get_config()
-            user_accounts = config.get("user_accounts", [])
-            
+            user_accounts = config.get('user_accounts', [])
+
             if not user_accounts:
                 raise MurError(
                     code=507,
-                    message="No user accounts found",
-                    detail="At least one user account is required. Please create an account first."
+                    message='No user accounts found',
+                    detail='At least one user account is required. Please create an account first.',
                 )
-                
+
             # Prompt user to select account if multiple exist
             if len(user_accounts) > 1:
-                self.scope = click.prompt(
-                    "Select account",
-                    type=click.Choice(user_accounts),
-                    show_choices=True
-                )
+                self.scope = click.prompt('Select account', type=click.Choice(user_accounts), show_choices=True)
             else:
                 self.scope = user_accounts[0]
         except Exception as e:
             if not isinstance(e, MurError):
                 raise MurError(
                     code=507,
-                    message="Failed to get user accounts",
-                    detail="Could not retrieve user accounts from configuration",
-                    original_error=e
+                    message='Failed to get user accounts',
+                    detail='Could not retrieve user accounts from configuration',
+                    original_error=e,
                 )
             raise
 
     def _validate_artifact_type(self, artifact_type: str) -> str:
         """Validate the artifact type.
-        
+
         Args:
             artifact_type: The artifact type to validate
-            
+
         Returns:
             The validated artifact type
-            
+
         Raises:
             MurError: If the artifact type is invalid
         """
@@ -260,8 +253,8 @@ class BuildCommand(ArtifactCommand):
         if not self.is_private_registry and not self.scope:
             raise MurError(
                 code=507,
-                message="No scope set",
-                detail="A scope is required for publishing to the public registry. Please run 'mur login' first."
+                message='No scope set',
+                detail="A scope is required for publishing to the public registry. Please run 'mur login' first.",
             )
         prefix = f'{self.scope}-' if not self.is_private_registry else ''
         artifact_name = f'{prefix}{self.build_manifest["name"]}'.lower()

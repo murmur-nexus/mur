@@ -3,10 +3,7 @@ from pathlib import Path
 
 import click
 
-from ..adapters import PrivateRegistryAdapter, PublicRegistryAdapter
-from ..core.auth import AuthenticationManager
-from ..core.packaging import ArtifactManifest, normalize_package_name
-from ..utils.constants import DEFAULT_MURMUR_INDEX_URL
+from ..core.packaging import normalize_package_name
 from ..utils.error_handler import MurError
 from .base import ArtifactCommand
 
@@ -26,17 +23,18 @@ class PublishCommand(ArtifactCommand):
         Args:
             verbose (bool): Whether to enable verbose output. Defaults to False.
             index_url (str | None): The index URL to use for publishing. Defaults to None.
+
         Raises:
             MurError: If the artifact type in murmur.yaml is invalid.
         """
         try:
             super().__init__('publish', verbose)
 
-            self.scope = None
-            
+            self.scope: str | None = None
+
             if not self.is_private_registry:
                 self._ensure_authenticated()
-            
+
             # Load manifest and determine artifact type
             try:
                 self.manifest = self._load_murmur_yaml_from_artifact()
@@ -111,13 +109,13 @@ class PublishCommand(ArtifactCommand):
 
     def _find_artifact_files(self) -> tuple[Path, list[str]]:
         """Find artifact distribution files for publishing.
-        
+
         Looks for .whl and .tar.gz files in the dist directory, first checking
         the current directory and then the artifact directory.
-        
+
         Returns:
             tuple[Path, list[str]]: A tuple containing the dist directory path and list of artifact filenames
-            
+
         Raises:
             MurError: If no dist directory or artifact files are found
         """
@@ -142,7 +140,7 @@ class PublishCommand(ArtifactCommand):
                 message='No artifact files found in dist directory',
                 detail='Please run "mur build" first to build the artifact.',
             )
-            
+
         return dist_dir, artifact_files
 
     def execute(self) -> None:
@@ -160,7 +158,7 @@ class PublishCommand(ArtifactCommand):
             # Find artifact files
             dist_dir, artifact_files = self._find_artifact_files()
             self.scope = artifact_files[0].split('_')[0]
-            
+
             # Publish package files
             self._publish_files(dist_dir, artifact_files)
 
@@ -169,14 +167,13 @@ class PublishCommand(ArtifactCommand):
                 artifact_name = normalized_artifact_name
             else:
                 artifact_name = f'{self.scope}_{normalized_artifact_name}'
-            
+
             self.log_success(
                 f'Successfully published {self.artifact_type} ' f'{artifact_name}=={self.manifest.version}'
             )
 
         except Exception as e:
             self.handle_error(e, f'Failed to publish {self.artifact_type}')
-
 
 
 def publish_command() -> click.Command:
