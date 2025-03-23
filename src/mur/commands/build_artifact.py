@@ -1,4 +1,5 @@
 import logging
+import re
 import shutil
 from pathlib import Path
 
@@ -28,11 +29,12 @@ class BuildCommand(ArtifactCommand):
         config (dict): The build configuration (alias for build_manifest).
     """
 
-    def __init__(self, verbose: bool = False) -> None:
+    def __init__(self, verbose: bool = False, scope: str | None = None) -> None:
         """Initialize build command.
 
         Args:
             verbose: Whether to enable verbose output
+            scope: Scope for the artifact (alphanumeric only, will be converted to lowercase)
 
         Raises:
             MurError: If initialization fails
@@ -40,22 +42,22 @@ class BuildCommand(ArtifactCommand):
         try:
             super().__init__('build', verbose)
             self.verbose = verbose
-            self.scope = None
+            self.scope = scope  # update scope in parent
 
             # Load and validate manifest
             self.build_manifest = self._load_build_manifest()
             self.artifact_type = self._validate_artifact_type(self.build_manifest.get('type', ''))
 
             if not self.is_private_registry:
-                self._ensure_authenticated()
-                self._set_scope_from_accounts()
+                if self.scope is None:
+                    self._get_scope_from_user()
 
         except Exception as e:
             if not isinstance(e, MurError):
                 raise MurError(code=207, message=str(e), original_error=e)
             raise
 
-    def _set_scope_from_accounts(self) -> None:
+    def _get_scope_from_user(self) -> None:
         """Set scope from user accounts.
 
         Loads user accounts from config and prompts user to select one if multiple exist.
@@ -68,18 +70,15 @@ class BuildCommand(ArtifactCommand):
             config = config_manager.get_config()
             user_accounts = config.get('user_accounts', [])
 
-            if not user_accounts:
-                raise MurError(
-                    code=507,
-                    message='No user accounts found',
-                    detail='At least one user account is required. Please create an account first.',
-                )
-
-            # Prompt user to select account if multiple exist
-            if len(user_accounts) > 1:
+            if user_accounts and len(user_accounts) > 1:
                 self.scope = click.prompt('Select account', type=click.Choice(user_accounts), show_choices=True)
             else:
-                self.scope = user_accounts[0]
+                if not user_accounts:
+                    raise MurError(
+                        code=310,
+                        message='No scope specified',
+                        detail="Please use 'mur build --scope <scope>' to specify a scope for building a public artifact",
+                    )
         except Exception as e:
             if not isinstance(e, MurError):
                 raise MurError(
@@ -488,10 +487,30 @@ def build_command() -> click.Command:
 
     @click.command()
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def build(verbose: bool) -> None:
+    @click.option(
+        '--scope', type=str, help='Scope for the artifact (alphanumeric only, will be converted to lowercase)'
+    )
+    def build(verbose: bool, scope: str | None = None) -> None:
         """Build a new artifact project."""
         try:
-            cmd = BuildCommand(verbose)
+            # Validate scope format if provided
+            print(scope)
+            if scope:
+                # Use regex to ensure only alphanumeric characters
+                if not re.match(r'^[a-zA-Z0-9]+$', scope):
+                    raise MurError(
+                        code=507,
+                        message='Invalid scope format',
+                        detail='Scope must contain only alphanumeric characters (no spaces, hyphens, or special characters).',
+                    )
+
+                # Convert to lowercase if provided
+                scope_value = scope.lower()
+            else:
+                scope_value = None
+
+            # Pass the scope to the BuildCommand constructor
+            cmd = BuildCommand(verbose=verbose, scope=scope_value)
             cmd.execute()
         except MurError as e:
             e.handle()

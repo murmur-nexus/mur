@@ -30,8 +30,7 @@ class PublishCommand(ArtifactCommand):
         """
         try:
             super().__init__('publish', verbose)
-
-            self.scope: str | None = None
+            self.verbose = verbose
 
             if not self.is_private_registry:
                 self._ensure_authenticated()
@@ -180,11 +179,18 @@ class PublishCommand(ArtifactCommand):
                 return parts[0]
 
         # No valid scope found
-        raise MurError(
-            code=310,
-            message='Invalid artifact scope',
-            detail=f"Artifact filenames must be prefixed with one of your accounts: {', '.join(user_accounts)}",
-        )
+        error_detail = f"Artifact filenames must be prefixed with one of your accounts: {', '.join(user_accounts)}"
+
+        # Add scope info to error if we can extract it
+        first_file = artifact_files[0]
+        parts = first_file.split('_', 1)
+        if len(parts) > 1:
+            error_detail += (
+                "\nUse 'mur build --scope <scope>' replacing <scope> with one of your accounts. \n"
+                "Tip: Set default scope with 'mur config set public scope my-scope'"
+            )
+
+        raise MurError(code=310, message=f'Found unknown scope: {parts[0]}', detail=error_detail)
 
     def execute(self) -> None:
         """Execute the publish command.
