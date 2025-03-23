@@ -276,60 +276,127 @@ class ArtifactCommand:
             MurError: If murmur-build.yaml is not found or if manifest validation fails.
         """
         if self.command_name == 'build':
-            # For build command, look in current directory
-            manifest_file_path = self.current_dir / 'murmur-build.yaml'
+            return self._load_build_manifest_from_current_dir()
+        else:
+            return self._load_build_manifest_from_artifact_dir()
 
-            if manifest_file_path.exists():
-                try:
-                    logger.debug(f'Loading manifest from {manifest_file_path}')
-                    manifest = ArtifactManifest(manifest_file_path, is_build_manifest=True)
-                    logger.debug('Successfully loaded manifest')
-                    return manifest
-                except MurError as e:
-                    logger.debug(f'{e}')
-                    raise
+    def _load_build_manifest_from_current_dir(self) -> ArtifactManifest:
+        """Load build manifest from current directory.
 
+        Returns:
+            ArtifactManifest: Artifact manifest from the build manifest.
+
+        Raises:
+            MurError: If murmur-build.yaml is not found or if manifest validation fails.
+        """
+        manifest_file_path = self.current_dir / 'murmur-build.yaml'
+
+        if not manifest_file_path.exists():
             raise MurError(
                 code=201,
                 message='murmur-build.yaml not found',
                 detail='The murmur-build.yaml manifest file was not found in the current directory',
             )
 
-        else:
-            # For other commands, look in both possible artifact directory structures
-            for artifact_type in ['agent', 'tool']:
-                # Get normalized name from manifest from pre-build manifest
-                pre_build_manifest_path = self.current_dir / 'murmur-build.yaml'
-                if not pre_build_manifest_path.exists():
-                    raise
+        try:
+            logger.debug(f'Loading manifest from {manifest_file_path}')
+            manifest = ArtifactManifest(manifest_file_path, is_build_manifest=True)
+            logger.debug('Successfully loaded manifest')
+            return manifest
+        except MurError as e:
+            logger.debug(f'{e}')
+            raise
 
-                pre_build_manifest = ArtifactManifest(pre_build_manifest_path, is_build_manifest=True)
-                normalized_artifact_name = normalize_package_name(pre_build_manifest.name)
+    def _load_build_manifest_from_artifact_dir(self) -> ArtifactManifest:
+        """Load build manifest from artifact directory structure.
 
-                # Try path with artifact name directory
-                artifact_path1 = (
-                    self.current_dir
-                    / normalized_artifact_name
-                    / 'src'
-                    / 'murmur'
-                    / f'{artifact_type}s'
-                    / normalized_artifact_name
-                )
-                # Try direct path
-                artifact_path2 = self.current_dir / 'src' / 'murmur' / f'{artifact_type}s' / normalized_artifact_name
-                for artifact_entry_path in [artifact_path1, artifact_path2]:
-                    manifest_file_path = artifact_entry_path / 'murmur-build.yaml'
-                    if manifest_file_path.exists():
-                        try:
-                            logger.debug(f'Loading manifest from {manifest_file_path}')
-                            manifest = ArtifactManifest(manifest_file_path, is_build_manifest=True)
-                            logger.debug('Successfully loaded manifest')
-                            return manifest
-                        except MurError:
-                            raise
+        Returns:
+            ArtifactManifest: Artifact manifest from the build manifest.
 
+        Raises:
+            MurError: If murmur-build.yaml is not found or if manifest validation fails.
+        """
+        # Get normalized name from pre-build manifest
+        pre_build_manifest_path = self.current_dir / 'murmur-build.yaml'
+        if not pre_build_manifest_path.exists():
             raise MurError(
                 code=201,
                 message='murmur-build.yaml not found',
-                detail='The murmur-build.yaml manifest file was not found in the artifact directory',
+                detail='The murmur-build.yaml manifest file was not found in the current directory',
             )
+
+        pre_build_manifest = ArtifactManifest(pre_build_manifest_path, is_build_manifest=True)
+        normalized_artifact_name = normalize_package_name(pre_build_manifest.name)
+
+        # Collect all possible manifest paths
+        manifest_file_paths: list[Path] = []
+        
+        # Check both agent and tool artifact types
+        for artifact_type in ['agent', 'tool']:
+            # Path 1: Check in artifact directory structure
+            self._add_manifest_paths_from_artifact_dir(
+                normalized_artifact_name, artifact_type, manifest_file_paths
+            )
+            
+            # Path 2: Check in direct structure
+            self._add_manifest_paths_from_direct_dir(artifact_type, manifest_file_paths)
+
+        # Try each found manifest path
+        for manifest_file_path in manifest_file_paths:
+            try:
+                logger.debug(f'Loading manifest from {manifest_file_path}')
+                manifest = ArtifactManifest(manifest_file_path, is_build_manifest=True)
+                logger.debug('Successfully loaded manifest')
+                return manifest
+            except MurError:
+                # Continue to the next manifest if this one fails
+                continue
+
+        raise MurError(
+            code=201,
+            message='murmur-build.yaml not found',
+            detail='The murmur-build.yaml manifest file was not found in the artifact directory',
+        )
+
+    def _add_manifest_paths_from_artifact_dir(
+        self, normalized_artifact_name: str, artifact_type: str, manifest_paths: list[Path]
+    ) -> None:
+        """Add manifest paths from artifact directory structure.
+
+        Args:
+            normalized_artifact_name: Normalized artifact name
+            artifact_type: Type of artifact (agent or tool)
+            manifest_paths: List to append found manifest paths to
+        """
+        artifact_dir_path = self.current_dir / normalized_artifact_name
+        if not artifact_dir_path.exists():
+            return
+
+        artifacts_type_dir = artifact_dir_path / 'src' / 'murmur' / f'{artifact_type}s'
+        if not artifacts_type_dir.exists():
+            return
+
+        # Search one level deep for any directories that might contain the manifest
+        for artifact_dir in artifacts_type_dir.iterdir():
+            if artifact_dir.is_dir():
+                manifest_path = artifact_dir / 'murmur-build.yaml'
+                if manifest_path.exists():
+                    manifest_paths.append(manifest_path)
+
+    def _add_manifest_paths_from_direct_dir(self, artifact_type: str, manifest_paths: list[Path]) -> None:
+        """Add manifest paths from direct directory structure.
+
+        Args:
+            artifact_type: Type of artifact (agent or tool)
+            manifest_paths: List to append found manifest paths to
+        """
+        direct_artifacts_type_dir = self.current_dir / 'src' / 'murmur' / f'{artifact_type}s'
+        if not direct_artifacts_type_dir.exists():
+            return
+
+        # Search one level deep for any directories that might contain the manifest
+        for artifact_dir in direct_artifacts_type_dir.iterdir():
+            if artifact_dir.is_dir():
+                manifest_path = artifact_dir / 'murmur-build.yaml'
+                if manifest_path.exists():
+                    manifest_paths.append(manifest_path)

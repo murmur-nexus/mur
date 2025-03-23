@@ -153,11 +153,13 @@ class BuildCommand(ArtifactCommand):
             src_path = artifact_path / 'src' / 'murmur' / f'{self.artifact_type}s'
             src_path.mkdir(parents=True, exist_ok=True)
 
-            package_path = src_path / artifact_path.name
-            package_path.mkdir(parents=True, exist_ok=True)
+            artifact_name = artifact_path.name
+            artifact_path = Path(f'{self.scope}_{artifact_name}' if self.scope else artifact_name)
+            namespace_path = src_path / artifact_path
+            namespace_path.mkdir(parents=True, exist_ok=True)
 
             # Create an empty __init__.py
-            with open(package_path / '__init__.py', 'w') as f:
+            with open(namespace_path / '__init__.py', 'w') as f:
                 pass
 
             logger.debug(f'Created directory structure at {artifact_path}')
@@ -172,16 +174,16 @@ class BuildCommand(ArtifactCommand):
                         detail='Source files found but main.py is missing. main.py is required as the default entry point.',
                     )
                 elif (main_file := self.current_dir / 'src' / 'main.py').exists():
-                    shutil.copy(main_file, package_path)
+                    shutil.copy(main_file, namespace_path)
                     if self.verbose:
                         logger.info('Copying source files...')
-                    logger.debug(f'Copied main.py to {package_path}')
+                    logger.debug(f'Copied main.py to {namespace_path}')
             else:
                 # Create default main.py if no source files exist
-                with open(package_path / 'main.py', 'w') as f:
+                with open(namespace_path / 'main.py', 'w') as f:
                     f.write('from murmur.build import ActivateAgent\n\n')
-                    f.write(f"{artifact_path.name} = ActivateAgent('{artifact_path.name}')\n")
-                logger.debug(f'Created default main.py with {artifact_path.name} function')
+                    f.write(f"{artifact_name} = ActivateAgent('{artifact_name}')\n")
+                logger.debug(f'Created default main.py with {artifact_name} function')
 
         except Exception as e:
             raise MurError(code=209, message='Failed to create directory structure', original_error=e)
@@ -379,7 +381,7 @@ class BuildCommand(ArtifactCommand):
         """
         return ['', '[tool.hatch.build.targets.wheel]', 'packages = ["src/murmur"]']
 
-    def _write_filtered_build_manifest(self, artifact_path: Path) -> None:
+    def _write_filtered_build_manifest(self, artifact_name: Path) -> None:
         """Filter and write configuration to murmur-build.yaml.
 
         Writes a filtered version of the configuration to the artifact's
@@ -387,7 +389,7 @@ class BuildCommand(ArtifactCommand):
         artifact type. For agents, this includes the 'instructions' key.
 
         Args:
-            artifact_path (Path): Path to new artifact.
+            artifact_name (Path): Path to new artifact.
 
         Raises:
             MurError: If writing config fails.
@@ -401,7 +403,8 @@ class BuildCommand(ArtifactCommand):
 
         filtered_config = {k: v for k, v in self.build_manifest.items() if k in allowed_keys}
 
-        package_entry_path = artifact_path / 'src' / 'murmur' / f'{self.artifact_type}s' / artifact_path.name
+        name = f'{self.scope}_{artifact_name.name}' if self.scope is not None else artifact_name.name
+        package_entry_path = artifact_name / 'src' / 'murmur' / f'{self.artifact_type}s' / name
 
         try:
             with open(package_entry_path / 'murmur-build.yaml', 'w') as f:

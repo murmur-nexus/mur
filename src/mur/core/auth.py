@@ -367,7 +367,6 @@ class AuthenticationManager:
                     message='Failed to fetch user accounts',
                     detail=f'Server returned status code {response.status_code}',
                 )
-            print(f'response.data: {response.data}')
             # Extract account names from the list of Account objects
             account_names = [account.scope for account in response.data]
 
