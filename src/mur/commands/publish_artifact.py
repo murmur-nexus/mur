@@ -3,6 +3,7 @@ from pathlib import Path
 
 import click
 
+from ..core.config import ConfigManager
 from ..core.packaging import normalize_package_name
 from ..utils.error_handler import MurError
 from .base import ArtifactCommand
@@ -143,6 +144,48 @@ class PublishCommand(ArtifactCommand):
 
         return dist_dir, artifact_files
 
+    def _get_valid_scope(self, artifact_files: list[str]) -> str | None:
+        """Determine the appropriate scope for the artifact.
+
+        In public flow, validates that artifact filenames start with a valid user account.
+        In private flow, scope remains None.
+
+        Args:
+            artifact_files: List of artifact filenames
+
+        Returns:
+            str | None: The validated scope or None for private registry
+
+        Raises:
+            MurError: If in public flow and no valid scope found in filenames
+        """
+        if self.is_private_registry:
+            return None
+
+        # Get user accounts from config
+        config = ConfigManager().get_config()
+        user_accounts = config.get('user_accounts', [])
+
+        if not user_accounts:
+            raise MurError(
+                code=507,
+                message='No user accounts found',
+                detail="Please authenticate with 'mur login' before publishing to public registry.",
+            )
+
+        # Check if any artifact file starts with a valid scope
+        for file_name in artifact_files:
+            parts = file_name.split('_', 1)
+            if len(parts) > 1 and parts[0] in user_accounts:
+                return parts[0]
+
+        # No valid scope found
+        raise MurError(
+            code=310,
+            message='Invalid artifact scope',
+            detail=f"Artifact filenames must be prefixed with one of your accounts: {', '.join(user_accounts)}",
+        )
+
     def execute(self) -> None:
         """Execute the publish command.
 
@@ -155,9 +198,9 @@ class PublishCommand(ArtifactCommand):
             Exception: If any step of the publishing process fails
         """
         try:
-            # Find artifact files
+            # Validate and get scope based on registry type
             dist_dir, artifact_files = self._find_artifact_files()
-            self.scope = artifact_files[0].split('_')[0]
+            self.scope = self._get_valid_scope(artifact_files)
 
             # Publish package files
             self._publish_files(dist_dir, artifact_files)

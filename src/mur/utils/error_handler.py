@@ -94,6 +94,7 @@ class MurError(Exception):
         307: 'Artifact Build Failed',
         308: 'Missing Dependencies',
         309: 'Failed to Uninstall Artifact',
+        310: 'Invalid Artifact Scope',
         # Category 5: Authentication/Authorization
         500: 'General Auth Error',
         501: 'Authentication Error',
