@@ -494,7 +494,6 @@ def build_command() -> click.Command:
         """Build a new artifact project."""
         try:
             # Validate scope format if provided
-            print(scope)
             if scope:
                 # Use regex to ensure only alphanumeric characters
                 if not re.match(r'^[a-zA-Z0-9]+$', scope):

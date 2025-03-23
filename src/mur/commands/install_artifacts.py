@@ -298,13 +298,12 @@ class InstallArtifactCommand(ArtifactCommand):
 
                 # Denormalize artifact name
                 normalized_artifact_name = artifact_name.replace('_', '-')
-                print(f'Denormalized artifact name: {normalized_artifact_name}')
 
                 try:
                     response = requests.get(f'{index_url}/{normalized_artifact_name}/metadata/', timeout=30)
                     response.raise_for_status()
                     package_info = response.json()
-                    artifact_type = package_info.get('artifact_type')
+                    artifact_type = package_info.get('type')
 
                     if not artifact_type:
                         raise MurError(
@@ -392,13 +391,11 @@ def install_command() -> click.Command:
 
         # Case 2: Two arguments - explicit artifact type and name
         if arg1 in ['agent', 'tool'] and arg2:
-            print(f'Installing 2 args: {arg1} {arg2}')
             cmd._install_single_artifact(arg2, arg1, fetch_metadata=False)
             return
 
         # Case 3: One argument - artifact name only, try to detect type
         if arg1 and not arg2:
-            print(f'Installing 1 arg:{arg1}')
             cmd._install_single_artifact(arg1, None, fetch_metadata=True)
             return
 
