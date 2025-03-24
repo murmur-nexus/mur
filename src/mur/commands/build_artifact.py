@@ -150,7 +150,7 @@ class BuildCommand(ArtifactCommand):
         """
         try:
             # Create murmur namespace package structure
-            src_path = artifact_path / 'src' / 'murmur' / f'{self.artifact_type}s'
+            src_path = artifact_path / 'src' / 'murmur' / 'artifacts'
             src_path.mkdir(parents=True, exist_ok=True)
 
             artifact_name = artifact_path.name
@@ -404,7 +404,8 @@ class BuildCommand(ArtifactCommand):
         filtered_config = {k: v for k, v in self.build_manifest.items() if k in allowed_keys}
 
         name = f'{self.scope}_{artifact_name.name}' if self.scope is not None else artifact_name.name
-        package_entry_path = artifact_name / 'src' / 'murmur' / f'{self.artifact_type}s' / name
+
+        package_entry_path = artifact_name / 'src' / 'murmur' / 'artifacts' / name
 
         try:
             with open(package_entry_path / 'murmur-build.yaml', 'w') as f:

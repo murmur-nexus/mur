@@ -331,13 +331,8 @@ class ArtifactCommand:
         # Collect all possible manifest paths
         manifest_file_paths: list[Path] = []
 
-        # Check both agent and tool artifact types
-        for artifact_type in ['agent', 'tool']:
-            # Path 1: Check in artifact directory structure
-            self._add_manifest_paths_from_artifact_dir(normalized_artifact_name, artifact_type, manifest_file_paths)
-
-            # Path 2: Check in direct structure
-            self._add_manifest_paths_from_direct_dir(artifact_type, manifest_file_paths)
+        # Check only in the unified artifacts directory structure
+        self._add_manifest_paths_from_unified_dir(normalized_artifact_name, manifest_file_paths)
 
         # Try each found manifest path
         for manifest_file_path in manifest_file_paths:
@@ -356,44 +351,24 @@ class ArtifactCommand:
             detail='The murmur-build.yaml manifest file was not found in the artifact directory',
         )
 
-    def _add_manifest_paths_from_artifact_dir(
-        self, normalized_artifact_name: str, artifact_type: str, manifest_paths: list[Path]
-    ) -> None:
-        """Add manifest paths from artifact directory structure.
+    def _add_manifest_paths_from_unified_dir(self, normalized_artifact_name: str, manifest_paths: list[Path]) -> None:
+        """Add manifest paths from the unified artifacts directory structure.
 
         Args:
             normalized_artifact_name: Normalized artifact name
-            artifact_type: Type of artifact (agent or tool)
             manifest_paths: List to append found manifest paths to
         """
         artifact_dir_path = self.current_dir / normalized_artifact_name
         if not artifact_dir_path.exists():
             return
 
-        artifacts_type_dir = artifact_dir_path / 'src' / 'murmur' / f'{artifact_type}s'
-        if not artifacts_type_dir.exists():
+        # Check unified 'artifacts' directory path
+        artifacts_dir = artifact_dir_path / 'src' / 'murmur' / 'artifacts'
+        if not artifacts_dir.exists():
             return
 
         # Search one level deep for any directories that might contain the manifest
-        for artifact_dir in artifacts_type_dir.iterdir():
-            if artifact_dir.is_dir():
-                manifest_path = artifact_dir / 'murmur-build.yaml'
-                if manifest_path.exists():
-                    manifest_paths.append(manifest_path)
-
-    def _add_manifest_paths_from_direct_dir(self, artifact_type: str, manifest_paths: list[Path]) -> None:
-        """Add manifest paths from direct directory structure.
-
-        Args:
-            artifact_type: Type of artifact (agent or tool)
-            manifest_paths: List to append found manifest paths to
-        """
-        direct_artifacts_type_dir = self.current_dir / 'src' / 'murmur' / f'{artifact_type}s'
-        if not direct_artifacts_type_dir.exists():
-            return
-
-        # Search one level deep for any directories that might contain the manifest
-        for artifact_dir in direct_artifacts_type_dir.iterdir():
+        for artifact_dir in artifacts_dir.iterdir():
             if artifact_dir.is_dir():
                 manifest_path = artifact_dir / 'murmur-build.yaml'
                 if manifest_path.exists():
