@@ -11,7 +11,8 @@ from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
 
-MAIN_CONFIG_SECTION = 'murmur-nexus'
+PUBLIC_CONFIG_SECTION = 'murmur-nexus'
+PRIVATE_CONFIG_SECTION = 'murmur-private'
 
 
 class ConfigCommand(ArtifactCommand):
@@ -53,17 +54,39 @@ class ConfigCommand(ArtifactCommand):
         config = configparser.ConfigParser()
         if path.exists():
             config.read(path)
-        if MAIN_CONFIG_SECTION not in config:
-            config[MAIN_CONFIG_SECTION] = {}
+        if PUBLIC_CONFIG_SECTION not in config:
+            config[PUBLIC_CONFIG_SECTION] = {}
+        if PRIVATE_CONFIG_SECTION not in config:
+            config[PRIVATE_CONFIG_SECTION] = {}
         return config
 
-    def set_config(self, key: str, value: str, use_global: bool = False) -> None:
+    def _get_section(self, section_type: str) -> str:
+        """Get the appropriate config section based on type.
+
+        Args:
+            section_type: Type of section ('public' or 'private')
+
+        Returns:
+            The section name to use
+
+        Raises:
+            MurError: If an invalid section type is provided
+        """
+        if section_type == 'public':
+            return PUBLIC_CONFIG_SECTION
+        elif section_type == 'private':
+            return PRIVATE_CONFIG_SECTION
+        else:
+            raise MurError(code=406, message=f"Invalid section type: {section_type}. Use 'public' or 'private'")
+
+    def set_config(self, section_type: str, key: str, value: str, use_global: bool = False) -> None:
         """Set configuration value.
 
         If local .murmurrc exists, it will be used unless use_global is True.
         If no local .murmurrc exists, global will be used.
 
         Args:
+            section_type: Type of section ('public' or 'private')
             key: Configuration key
             value: Configuration value
             use_global: Force using global config even if local exists
@@ -76,52 +99,56 @@ class ConfigCommand(ArtifactCommand):
             use_local = self.local_config_path.exists() and not use_global
             config_path = self.local_config_path if use_local else self.global_config_path
             scope = 'local' if use_local else 'global'
+            section = self._get_section(section_type)
 
             config_path.parent.mkdir(parents=True, exist_ok=True)
             config = self._load_config(config_path)
-            config[MAIN_CONFIG_SECTION][key] = value
+            config[section][key] = value
 
             with open(config_path, 'w') as f:
                 config.write(f)
 
-            self.log_success(f'Set {key}={value} in {scope} .murmurrc')
+            self.log_success(f'Set {section_type}.{key}={value} in {scope} .murmurrc')
 
         except Exception as e:
-            raise MurError(code=401, message=f'Failed to set {key} in configuration', original_error=e)
+            raise MurError(code=401, message=f'Failed to set {section_type}.{key} in configuration', original_error=e)
 
-    def get_config(self, key: str) -> Optional[str]:
+    def get_config(self, section_type: str, key: str) -> Optional[str]:
         """Get configuration value.
 
         Checks local .murmurrc first if it exists, falls back to global.
 
         Args:
+            section_type: Type of section ('public' or 'private')
             key: Configuration key to retrieve
 
         Returns:
             Configuration value if found, None otherwise
         """
         try:
+            section = self._get_section(section_type)
+
             # Check local first if it exists
             if self.local_config_path.exists():
                 local_config = self._load_config(self.local_config_path)
-                if key in local_config[MAIN_CONFIG_SECTION]:
-                    value = local_config[MAIN_CONFIG_SECTION][key]
-                    click.echo(f'{key}: {value} (local)')
+                if key in local_config[section]:
+                    value = local_config[section][key]
+                    click.echo(f'{value}')
                     return value
 
             # Fall back to global
             if self.global_config_path.exists():
                 global_config = self._load_config(self.global_config_path)
-                if key in global_config[MAIN_CONFIG_SECTION]:
-                    value = global_config[MAIN_CONFIG_SECTION][key]
-                    click.echo(f'{key}: {value} (global)')
+                if key in global_config[section]:
+                    value = global_config[section][key]
+                    click.echo(f'{value}')
                     return value
 
-            click.echo(f"Configuration key '{key}' not found in local or global .murmurrc")
+            # Return nothing if key not found
             return None
 
         except Exception as e:
-            raise MurError(code=402, message=f'Failed to get configuration for {key}', original_error=e)
+            raise MurError(code=402, message=f'Failed to get configuration for {section_type}.{key}', original_error=e)
 
     def list_config(self) -> None:
         """List all configuration values.
@@ -134,33 +161,65 @@ class ConfigCommand(ArtifactCommand):
             global_config = self._load_config(self.global_config_path)
             local_config = self._load_config(self.local_config_path)
 
+            has_values = False
+
             # Display global settings
-            if global_config[MAIN_CONFIG_SECTION]:
-                click.echo('\nGlobal settings (.murmurrc):')
-                click.echo(f'Path: {self.global_config_path}')
-                for key, value in global_config[MAIN_CONFIG_SECTION].items():
-                    click.echo(f'{key}: {value}')
+            has_values = (
+                self._display_config_section(global_config, 'Global settings (.murmurrc)', self.global_config_path)
+                or has_values
+            )
 
             # Display local settings
-            if local_config[MAIN_CONFIG_SECTION]:
-                click.echo('\nLocal settings (.murmurrc):')
-                click.echo(f'Path: {self.local_config_path}')
-                for key, value in local_config[MAIN_CONFIG_SECTION].items():
-                    click.echo(f'{key}: {value}')
+            has_values = (
+                self._display_config_section(local_config, 'Local settings (.murmurrc)', self.local_config_path)
+                or has_values
+            )
 
-            if not (global_config[MAIN_CONFIG_SECTION] or local_config[MAIN_CONFIG_SECTION]):
+            if not has_values:
                 click.echo('No configuration values found')
 
         except Exception as e:
             raise MurError(code=403, message='Failed to list configurations', original_error=e)
 
-    def unset_config(self, key: str, use_global: bool = False) -> None:
+    def _display_config_section(self, config: configparser.ConfigParser, header: str, path: Path) -> bool:
+        """Display configuration sections with their values.
+
+        Args:
+            config: Configuration to display
+            header: Header text to display
+            path: Path to the configuration file
+
+        Returns:
+            True if any values were displayed, False otherwise
+        """
+        has_values = False
+
+        if config[PUBLIC_CONFIG_SECTION] or config[PRIVATE_CONFIG_SECTION]:
+            click.echo(f'\n{header}:')
+            click.echo(f'Path: {path}')
+
+            if config[PUBLIC_CONFIG_SECTION]:
+                has_values = True
+                click.echo(f'\n[{PUBLIC_CONFIG_SECTION}]')
+                for key, value in config[PUBLIC_CONFIG_SECTION].items():
+                    click.echo(f'{key}: {value}')
+
+            if config[PRIVATE_CONFIG_SECTION]:
+                has_values = True
+                click.echo(f'\n[{PRIVATE_CONFIG_SECTION}]')
+                for key, value in config[PRIVATE_CONFIG_SECTION].items():
+                    click.echo(f'{key}: {value}')
+
+        return has_values
+
+    def unset_config(self, section_type: str, key: str, use_global: bool = False) -> None:
         """Unset configuration value.
 
         If local .murmurrc exists, it will be used unless use_global is True.
         If no local .murmurrc exists, global will be used.
 
         Args:
+            section_type: Type of section ('public' or 'private')
             key: Configuration key to unset
             use_global: Force using global config even if local exists
         """
@@ -169,20 +228,23 @@ class ConfigCommand(ArtifactCommand):
             use_local = self.local_config_path.exists() and not use_global
             config_path = self.local_config_path if use_local else self.global_config_path
             scope = 'local' if use_local else 'global'
+            section = self._get_section(section_type)
 
             if config_path.exists():
                 config = self._load_config(config_path)
-                if key in config[MAIN_CONFIG_SECTION]:
-                    del config[MAIN_CONFIG_SECTION][key]
+                if key in config[section]:
+                    del config[section][key]
                     with open(config_path, 'w') as f:
                         config.write(f)
-                    self.log_success(f'Removed {key} from {scope} .murmurrc')
+                    self.log_success(f'Removed {section_type}.{key} from {scope} .murmurrc')
                     return
 
-            click.echo(f"Configuration key '{key}' not found in {scope} .murmurrc")
+            click.echo(f"Configuration key '{section_type}.{key}' not found in {scope} .murmurrc")
 
         except Exception as e:
-            raise MurError(code=404, message=f'Failed to unset configuration for {key}', original_error=e)
+            raise MurError(
+                code=404, message=f'Failed to unset configuration for {section_type}.{key}', original_error=e
+            )
 
     def init_config(self, use_global: bool = False) -> None:
         """Initialize a new .murmurrc file.
@@ -214,10 +276,11 @@ class ConfigCommand(ArtifactCommand):
 
             # Create new config with default settings
             config = configparser.ConfigParser()
-            config[MAIN_CONFIG_SECTION] = {
+            config[PUBLIC_CONFIG_SECTION] = {
                 'index-url': DEFAULT_MURMUR_INDEX_URL,
                 'extra-index-url': ' '.join(DEFAULT_MURMUR_EXTRA_INDEX_URLS),
             }
+            config[PRIVATE_CONFIG_SECTION] = {}
 
             with open(config_path, 'w') as f:
                 config.write(f)
@@ -248,22 +311,30 @@ def config_command() -> click.Group:
         pass
 
     @config.command()
+    @click.argument('section_type', type=click.Choice(['public', 'private']))
     @click.argument('key')
     @click.argument('value')
     @click.option('--global', 'use_global', is_flag=True, help='Force using global config')
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def set(key: str, value: str, use_global: bool, verbose: bool) -> None:
-        """Set a configuration value."""
+    def set(section_type: str, key: str, value: str, use_global: bool, verbose: bool) -> None:
+        """Set a configuration value.
+
+        SECTION_TYPE must be either 'public' or 'private'.
+        """
         cmd = ConfigCommand(verbose)
-        cmd.set_config(key, value, use_global)
+        cmd.set_config(section_type, key, value, use_global)
 
     @config.command()
+    @click.argument('section_type', type=click.Choice(['public', 'private']))
     @click.argument('key')
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def get(key: str, verbose: bool) -> None:
-        """Get a configuration value."""
+    def get(section_type: str, key: str, verbose: bool) -> None:
+        """Get a configuration value.
+
+        SECTION_TYPE must be either 'public' or 'private'.
+        """
         cmd = ConfigCommand(verbose)
-        cmd.get_config(key)
+        cmd.get_config(section_type, key)
 
     @config.command()
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
@@ -273,13 +344,17 @@ def config_command() -> click.Group:
         cmd.list_config()
 
     @config.command()
+    @click.argument('section_type', type=click.Choice(['public', 'private']))
     @click.argument('key')
     @click.option('--global', 'use_global', is_flag=True, help='Force using global config')
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def unset(key: str, use_global: bool, verbose: bool) -> None:
-        """Unset a configuration value."""
+    def unset(section_type: str, key: str, use_global: bool, verbose: bool) -> None:
+        """Unset a configuration value.
+
+        SECTION_TYPE must be either 'public' or 'private'.
+        """
         cmd = ConfigCommand(verbose)
-        cmd.unset_config(key, use_global)
+        cmd.unset_config(section_type, key, use_global)
 
     @config.command()
     @click.option('--global', 'use_global', is_flag=True, help='Create global config instead of local')

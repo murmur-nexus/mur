@@ -330,14 +330,12 @@ class ArtifactCommand:
 
         # Collect all possible manifest paths
         manifest_file_paths: list[Path] = []
-        
+
         # Check both agent and tool artifact types
         for artifact_type in ['agent', 'tool']:
             # Path 1: Check in artifact directory structure
-            self._add_manifest_paths_from_artifact_dir(
-                normalized_artifact_name, artifact_type, manifest_file_paths
-            )
-            
+            self._add_manifest_paths_from_artifact_dir(normalized_artifact_name, artifact_type, manifest_file_paths)
+
             # Path 2: Check in direct structure
             self._add_manifest_paths_from_direct_dir(artifact_type, manifest_file_paths)
 
