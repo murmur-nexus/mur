@@ -10,7 +10,7 @@ from ruamel.yaml import YAML
 from ..adapters.adapter_factory import get_index_url_from_config, get_registry_adapter
 from ..adapters.private_adapter import PrivateRegistryAdapter
 from ..core.auth import AuthenticationManager
-from ..core.packaging import ArtifactManifest, normalize_package_name
+from ..core.packaging import ArtifactManifest, normalize_artifact_name
 from ..utils.constants import DEFAULT_MURMUR_EXTRA_INDEX_URLS, DEFAULT_MURMUR_INDEX_URL, GLOBAL_MURMURRC_PATH
 from ..utils.error_handler import MurError
 
@@ -326,7 +326,7 @@ class ArtifactCommand:
             )
 
         pre_build_manifest = ArtifactManifest(pre_build_manifest_path, is_build_manifest=True)
-        normalized_artifact_name = normalize_package_name(pre_build_manifest.name)
+        normalized_artifact_name = normalize_artifact_name(pre_build_manifest.name)
 
         # Collect all possible manifest paths
         manifest_file_paths: list[Path] = []

@@ -223,16 +223,16 @@ class ArtifactManifest:
 
 @dataclass
 class BuildResult:
-    """Results from a package build operation.
+    """Results from a distribution build operation.
 
     Args:
-        dist_dir: Path to the distribution directory containing built packages
-        package_files: List of built package filenames
+        dist_dir: Path to the distribution directory containing built distributions
+        distribution_files: List of built distribution filenames
         build_output: String output from the build process
     """
 
     dist_dir: Path
-    package_files: list[str]
+    distribution_files: list[str]
     build_output: str
 
 
@@ -328,13 +328,13 @@ class ArtifactBuilder:
                 debug_messages.append(f'stderr: {e.stderr}')
             raise MurError(code=307, message=error_msg, detail=detail, debug_messages=debug_messages)
 
-        dist_dir, package_files = self._get_build_artifacts()
+        dist_dir, distribution_files = self._get_build_artifacts()
         if self.verbose:
-            logger.info(f"Built package files: {', '.join(package_files)}")
+            logger.info(f"Built distribution files: {', '.join(distribution_files)}")
 
-        return BuildResult(dist_dir=dist_dir, package_files=package_files, build_output=result.stdout)
+        return BuildResult(dist_dir=dist_dir, distribution_files=distribution_files, build_output=result.stdout)
 
-    def _is_package_file(self, file: Path) -> bool:
+    def _is_distribution_file(self, file: Path) -> bool:
         # Check for wheel files
         if file.suffix == '.whl':
             return True
@@ -342,29 +342,29 @@ class ArtifactBuilder:
         return file.name.endswith(('.tar.gz', '.tar'))
 
     def _get_build_artifacts(self) -> tuple[Path, list[str]]:
-        """Get the built package files from the dist directory.
+        """Get the built distribution files from the dist directory.
 
         Returns:
             tuple: A tuple containing:
                 - Path: The dist directory path
-                - list[str]: List of package filenames
+                - list[str]: List of distribution filenames
 
         Raises:
-            MurError: If no build artifacts are found or dist directory is missing
+            MurError: If no distribution files are found or dist directory is missing
         """
         dist_dir = self.project_dir / 'dist'
         if not dist_dir.exists():
             raise MurError(code=307, message="Directory 'dist' not found")
 
-        package_files = [f.name for f in dist_dir.iterdir() if self._is_package_file(f)]
+        distribution_files = [f.name for f in dist_dir.iterdir() if self._is_distribution_file(f)]
 
-        if self.verbose and package_files:
-            logger.info(f'Found {len(package_files)} package file(s).')
+        if self.verbose and distribution_files:
+            logger.info(f'Found {len(distribution_files)} distribution file(s).')
 
-        if not package_files:
-            raise MurError(code=307, message="No package files found in 'dist' directory")
+        if not distribution_files:
+            raise MurError(code=307, message="No distribution files found in 'dist' directory")
 
-        return dist_dir, package_files
+        return dist_dir, distribution_files
 
 
 class MetadataValidator:
@@ -502,40 +502,40 @@ class MetadataValidator:
                 code=207, message='Each requirement must be a string', detail=f'Invalid value: {requirement}.'
             )
 
-        # Split requirement into package spec and environment marker
+        # Split requirement into artifact spec and environment marker
         parts = requirement.split(';')
-        package_spec = parts[0].strip()
+        artifact_spec = parts[0].strip()
 
         try:
-            MetadataValidator._validate_package_spec(package_spec)
+            MetadataValidator._validate_artifact_spec(artifact_spec)
             if len(parts) > 1:
                 MetadataValidator._validate_environment_marker(parts[1].strip())
         except Exception as e:
             raise MurError(
                 code=207,
-                message='Invalid package specification',
+                message='Invalid artifact specification',
                 detail=f'Got value: {requirement}.',
                 original_error=e,
             )
 
     @staticmethod
-    def _validate_package_spec(package_spec: str) -> None:
-        """Validate package specification part."""
+    def _validate_artifact_spec(artifact_spec: str) -> None:
+        """Validate artifact specification part."""
         version_start = -1
         for operator in ['>=', '<=', '!=', '==', '~=', '>', '<']:
-            pos = package_spec.find(operator)
+            pos = artifact_spec.find(operator)
             if pos != -1 and (version_start == -1 or pos < version_start):
                 version_start = pos
 
         if version_start != -1:
-            package_name = package_spec[:version_start].strip()
-            version_part = package_spec[version_start:].strip()
+            artifact_name = artifact_spec[:version_start].strip()
+            version_part = artifact_spec[version_start:].strip()
         else:
-            package_name = package_spec
+            artifact_name = artifact_spec
             version_part = ''
 
-        if not re.match(r'^[A-Za-z0-9][-A-Za-z0-9_.]*$', package_name):
-            raise ValueError('Invalid package name format')
+        if not re.match(r'^[A-Za-z0-9][-A-Za-z0-9_.]*$', artifact_name):
+            raise MurError(code=207, message='Invalid artifact name format', detail=f'Got value: {artifact_name}')
 
         if version_part:
             SpecifierSet(version_part)
@@ -581,14 +581,14 @@ class MetadataValidator:
         validator(value)
 
 
-def normalize_package_name(project_name: str) -> str:
-    """Normalize a project name to a valid Python package name according to PEP 8.
+def normalize_artifact_name(project_name: str) -> str:
+    """Normalize a project name to a valid Python artifact name according to PEP 8.
 
     Args:
-        project_name: Original project/package name
+        project_name: Original project/artifact name
 
     Returns:
-        str: Normalized package name following PEP 8 conventions
+        str: Normalized artifact name following PEP 8 conventions
     """
     # Replace invalid characters (including dots) with '_'
     name = re.sub(r'[^a-zA-Z0-9_]', '_', project_name.replace('-', '_').replace('.', '_'))

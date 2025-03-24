@@ -4,7 +4,7 @@ from pathlib import Path
 import click
 
 from ..core.config import ConfigManager
-from ..core.packaging import normalize_package_name
+from ..core.packaging import normalize_artifact_name
 from ..utils.error_handler import MurError
 from .base import ArtifactCommand
 
@@ -68,13 +68,13 @@ class PublishCommand(ArtifactCommand):
                 logger.info('Publishing artifact...')
 
             # Validate artifact names in build files
-            normalized_name = normalize_package_name(self.manifest.name)
+            normalized_name = normalize_artifact_name(self.manifest.name)
             for file_name in artifact_files:
                 # Extract artifact name from file (everything before first dash)
                 artifact_name = file_name.split('-')[0]
                 # Remove scope if present before comparing
                 unscoped_artifact_name = self._remove_scope(artifact_name)
-                if normalize_package_name(unscoped_artifact_name) != normalized_name:
+                if normalize_artifact_name(unscoped_artifact_name) != normalized_name:
                     raise MurError(
                         code=603,
                         message='Invalid artifact name in build files',
@@ -123,7 +123,7 @@ class PublishCommand(ArtifactCommand):
         dist_dir = self.current_dir / 'dist'
         if not dist_dir.exists() or (not any(dist_dir.glob('*.whl')) and not any(dist_dir.glob('*.tar.gz'))):
             # Try artifact directory
-            normalized_artifact_name = normalize_package_name(self.manifest.name)
+            normalized_artifact_name = normalize_artifact_name(self.manifest.name)
             artifact_dir = self.current_dir / normalized_artifact_name / 'dist'
             if not artifact_dir.exists():
                 raise MurError(
@@ -211,7 +211,7 @@ class PublishCommand(ArtifactCommand):
             # Publish package files
             self._publish_files(dist_dir, artifact_files)
 
-            normalized_artifact_name = normalize_package_name(self.manifest.name)
+            normalized_artifact_name = normalize_artifact_name(self.manifest.name)
             if self.is_private_registry:
                 artifact_name = normalized_artifact_name
             else:

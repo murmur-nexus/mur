@@ -6,7 +6,7 @@ from pathlib import Path
 import click
 
 from ..core.config import ConfigManager
-from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_package_name
+from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_artifact_name
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
 from .base import ArtifactCommand
@@ -448,7 +448,7 @@ class BuildCommand(ArtifactCommand):
             is_valid_artifact_name_version(self.build_manifest['name'], self.build_manifest['version'])
 
             # Determine artifact path
-            artifact_name = normalize_package_name(self.build_manifest['name'])
+            artifact_name = normalize_artifact_name(self.build_manifest['name'])
             artifact_path = self.current_dir / artifact_name
 
             if artifact_path.exists():

@@ -32,16 +32,13 @@ class InstallArtifactCommand(ArtifactCommand):
         """
         super().__init__('install', verbose)
 
-    def _get_murmur_packages_dir(self, artifact_type: str) -> Path:
-        """Get the murmur packages directory path.
-
-        Args:
-            artifact_type (str): Type of artifact (e.g., 'agents', 'tools')
+    def _get_murmur_packages_dir(self) -> Path:
+        """Get the murmur artifacts directory path.
 
         Returns:
-            Path: Path to site-packages/murmur/<artifact_type>/
+            Path: Path to site-packages/murmur/artifacts/
         """
-        site_packages = Path(sysconfig.get_path('purelib')) / 'murmur' / artifact_type
+        site_packages = Path(sysconfig.get_path('purelib')) / 'murmur' / 'artifacts'
         site_packages.mkdir(parents=True, exist_ok=True)
         return site_packages
 
@@ -235,17 +232,16 @@ class InstallArtifactCommand(ArtifactCommand):
                 debug_messages=["importlib.util.find_spec('murmur') returned None"],
             )
 
-    def _update_init_file(self, package_name: str, artifact_type: str) -> None:
+    def _update_init_file(self, package_name: str) -> None:
         """Update __init__.py file with import statement.
 
-        Updates or creates the __init__.py file in the appropriate murmur package directory
+        Updates or creates the __init__.py file in the artifacts directory
         with an import statement for the installed artifact.
 
         Args:
             package_name (str): Name of the package to import
-            artifact_type (str): Type of artifact ('agents' or 'tools')
         """
-        init_path = self._get_murmur_packages_dir(artifact_type) / '__init__.py'
+        init_path = self._get_murmur_packages_dir() / '__init__.py'
 
         package_name_pep8 = package_name.lower().replace('-', '_')
 
@@ -265,76 +261,33 @@ class InstallArtifactCommand(ArtifactCommand):
             with open(init_path, 'w') as f:
                 f.write(current_content + import_line + '\n')
 
-    def _install_artifact_group(self, artifacts: list[dict], artifact_type: str) -> None:
-        """Install a group of artifacts of the same type.
+    def _install_artifact_group(self, artifacts: list[dict]) -> None:
+        """Install a group of artifacts.
 
         Args:
             artifacts (list[dict]): List of artifacts to install from yaml manifest
-            artifact_type (str): Type of artifact ('agents' or 'tools')
         """
         for artifact in artifacts:
             self._install_artifact(artifact['name'], artifact['version'])
             # Update __init__.py file
-            self._update_init_file(artifact['name'], artifact_type)
+            self._update_init_file(artifact['name'])
 
-            # If this is an agent, also install its tools
-            if artifact_type == 'agents' and (tools := artifact.get('tools', [])):
-                self._install_artifact_group(tools, 'tools')
+            # Also install tools if this is an agent
+            if tools := artifact.get('tools', []):
+                self._install_artifact_group(tools)
 
-    def _install_single_artifact(
-        self, artifact_name: str, artifact_type: str | None, fetch_metadata: bool = False
-    ) -> None:
+    def _install_single_artifact(self, artifact_name: str) -> None:
         """Install a single artifact.
 
         Args:
             artifact_name: Name of the artifact to install
-            artifact_type: Type of the artifact ('agent' or 'tool'), or None to auto-detect
-            fetch_metadata: Whether to fetch metadata to determine artifact type
         """
         try:
-            # If artifact_type is not provided, try to fetch from metadata
-            if fetch_metadata and not artifact_type:
-                index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
-
-                # Denormalize artifact name
-                normalized_artifact_name = artifact_name.replace('_', '-')
-
-                try:
-                    response = requests.get(f'{index_url}/{normalized_artifact_name}/metadata/', timeout=30)
-                    response.raise_for_status()
-                    package_info = response.json()
-                    artifact_type = package_info.get('type')
-
-                    if not artifact_type:
-                        raise MurError(
-                            code=606,
-                            message=f"Could not determine artifact type for '{normalized_artifact_name}'",
-                            detail="The artifact metadata doesn't specify a type. Please use 'mur install [agent|tool] [artifact_name]' instead.",
-                        )
-
-                except RequestException as e:
-                    raise MurError(
-                        code=606,
-                        message=f"Metadata not available for '{normalized_artifact_name}'",
-                        detail="The artifact server doesn't support metadata or the artifact doesn't exist. Please use 'mur install [agent|tool] [artifact_name]' instead.",
-                        original_error=e,
-                    )
-
-            if not artifact_type:
-                raise MurError(
-                    code=104,
-                    message='Missing artifact type',
-                    detail="Please specify the artifact type: 'mur install [agent|tool] [artifact_name]",
-                )
-
-            # Normalize artifact type (singular to plural)
-            artifact_type_plural = f'{artifact_type}s'
-
             # Install the artifact with latest version
             self._install_artifact(artifact_name, 'latest')
-            self._update_init_file(artifact_name, artifact_type_plural)
+            self._update_init_file(artifact_name)
 
-            self.log_success(f"Successfully installed {artifact_type} '{artifact_name}'")
+            self.log_success(f"Successfully installed artifact '{artifact_name}'")
 
         except Exception as e:
             self.handle_error(e, f"Failed to install '{artifact_name}'")
@@ -351,13 +304,18 @@ class InstallArtifactCommand(ArtifactCommand):
 
             manifest = self._load_murmur_yaml_from_current_dir()
 
-            # Install agents and their tools if any
-            if agents := manifest.get('agents', []):
-                self._install_artifact_group(agents, 'agents')
+            # Install all artifacts (agents and tools) to the unified location
+            artifacts = []
 
-            # Install root-level tools if any
+            # Collect all artifacts from the manifest
+            if agents := manifest.get('agents', []):
+                artifacts.extend(agents)
+
             if tools := manifest.get('tools', []):
-                self._install_artifact_group(tools, 'tools')
+                artifacts.extend(tools)
+
+            # Install all artifacts
+            self._install_artifact_group(artifacts)
 
             self.log_success('Successfully installed all artifacts')
 
@@ -369,41 +327,24 @@ def install_command() -> click.Command:
     """Create the install command for Click."""
 
     @click.command()
-    @click.argument('arg1', required=False)
-    @click.argument('arg2', required=False)
+    @click.argument('artifact_name', required=False)
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def install(arg1: str | None, arg2: str | None, verbose: bool) -> None:
+    def install(artifact_name: str | None, verbose: bool) -> None:
         """Install artifacts from murmur.yaml or a specific artifact.
 
         Usage patterns:
-        - mur install                      # Install all artifacts from murmur.yaml
-        - mur install my-artifact          # Install artifact with auto-detected type
-        - mur install agent my-agent       # Install agent with explicit type
-        - mur install tool my-tool         # Install tool with explicit type
+        - mur install                 # Install all artifacts from murmur.yaml
+        - mur install my-artifact     # Install a specific artifact
         """
         cmd = InstallArtifactCommand(verbose)
         cmd._murmur_must_be_installed()
 
         # Case 1: No arguments - install from manifest
-        if not arg1:
+        if not artifact_name:
             cmd.execute()
             return
 
-        # Case 2: Two arguments - explicit artifact type and name
-        if arg1 in ['agent', 'tool'] and arg2:
-            cmd._install_single_artifact(arg2, arg1, fetch_metadata=False)
-            return
-
-        # Case 3: One argument - artifact name only, try to detect type
-        if arg1 and not arg2:
-            cmd._install_single_artifact(arg1, None, fetch_metadata=True)
-            return
-
-        # Case 4: Invalid usage
-        raise MurError(
-            code=101,
-            message='Invalid command usage',
-            detail='Usage: mur install [artifact_name] or mur install [agent|tool] [artifact_name]',
-        )
+        # Case 2: One argument - install specific artifact
+        cmd._install_single_artifact(artifact_name)
 
     return install

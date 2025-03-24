@@ -9,7 +9,7 @@ import click
 from mur.commands.base import ArtifactCommand
 from mur.utils.error_handler import MessageType, MurError
 
-from ..core.packaging import normalize_package_name
+from ..core.packaging import normalize_artifact_name
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +60,12 @@ class UninstallArtifactCommand(ArtifactCommand):
         Returns:
             str | None: Actual installed artifact name if found, None otherwise
         """
-        normalized_name = normalize_package_name(artifact_name)
+        normalized_name = normalize_artifact_name(artifact_name)
         if self.verbose:
             logger.debug(f'Looking for normalized name: {normalized_name}')
 
         for pkg in artifacts:
-            if normalize_package_name(pkg['name']) == normalized_name:
+            if normalize_artifact_name(pkg['name']) == normalized_name:
                 return pkg['name']
         return None
 
@@ -108,12 +108,11 @@ class UninstallArtifactCommand(ArtifactCommand):
                 raise MurError(code=309, message=f'Failed to process {artifact_name}', original_error=str(e))
             raise
 
-    def _remove_from_init_file(self, artifact_name: str, artifact_type: str) -> None:
-        """Remove artifact import from __init__.py if it exists.
+    def _remove_from_init_file(self, artifact_name: str) -> None:
+        """Remove artifact import from artifacts/__init__.py if it exists.
 
         Args:
             artifact_name (str): Name of the artifact whose import should be removed.
-            artifact_type (str): Type of artifact ('agents' or 'tools').
         """
         try:
             import importlib.util
@@ -127,8 +126,8 @@ class UninstallArtifactCommand(ArtifactCommand):
             init_path = None
             for location in spec.submodule_search_locations:
                 if self.verbose:
-                    logger.info(f'Checking murmur namespace location for {artifact_type}: {location}')
-                path = Path(location) / artifact_type / '__init__.py'
+                    logger.info(f'Checking murmur namespace location for artifacts: {location}')
+                path = Path(location) / 'artifacts' / '__init__.py'
                 if path.exists():
                     init_path = path
                     break
@@ -136,12 +135,12 @@ class UninstallArtifactCommand(ArtifactCommand):
             if not init_path:
                 raise MurError(
                     code=201,
-                    message=f'Could not find {artifact_type} __init__.py in murmur namespace locations',
+                    message='Could not find artifacts/__init__.py in murmur namespace locations',
                     type=MessageType.WARNING,
                 )
 
             if self.verbose:
-                logger.info(f'Removing import from {init_path} for {artifact_type}')
+                logger.info(f'Removing import from {init_path}')
 
             # Normalize artifact name to lowercase and replace hyphens with underscores
             artifact_name_pep8 = artifact_name.lower().replace('-', '_')
@@ -163,24 +162,23 @@ class UninstallArtifactCommand(ArtifactCommand):
         """Uninstall all artifacts specified in murmur.yaml."""
         try:
             manifest = self._load_murmur_yaml_from_current_dir()
+            artifacts = []
 
-            # Uninstall agents
-            for agent in manifest.get('agents', []):
+            # Collect all artifacts from the manifest
+            if agents := manifest.get('agents', []):
+                artifacts.extend(agents)
+
+            if tools := manifest.get('tools', []):
+                artifacts.extend(tools)
+
+            # Uninstall all artifacts
+            for artifact in artifacts:
                 try:
                     if self.verbose:
-                        logger.debug(f'Uninstalling agent: {agent["name"]}')
-                    self._uninstall_single_artifact(agent['name'])
+                        logger.debug(f'Uninstalling artifact: {artifact["name"]}')
+                    self._uninstall_single_artifact(artifact['name'])
                 except Exception as e:
-                    logger.warning(f'Failed to uninstall agent {agent["name"]}: {e}')
-
-            # Uninstall tools
-            for tool in manifest.get('tools', []):
-                try:
-                    if self.verbose:
-                        logger.debug(f'Uninstalling tool: {tool["name"]}')
-                    self._uninstall_single_artifact(tool['name'])
-                except Exception as e:
-                    logger.warning(f'Failed to uninstall tool {tool["name"]}: {e}')
+                    logger.warning(f'Failed to uninstall artifact {artifact["name"]}: {e}')
 
             click.echo(click.style('Successfully uninstalled all artifacts from manifest', fg='green'))
         except Exception as e:
@@ -194,9 +192,7 @@ class UninstallArtifactCommand(ArtifactCommand):
                 logger.debug(f'Attempting to uninstall artifact as provided: {artifact_name}')
 
             self._uninstall_artifact(artifact_name)
-
-            self._remove_from_init_file(artifact_name, 'agents')
-            self._remove_from_init_file(artifact_name, 'tools')
+            self._remove_from_init_file(artifact_name)
 
         except Exception as e:
             raise MurError(code=309, message=f'Failed to uninstall {artifact_name}', original_error=e)
