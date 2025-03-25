@@ -21,7 +21,7 @@ class PublicRegistryAdapter(RegistryAdapter):
     """Adapter for the public Murmur registry.
 
     This class handles interactions with the public Murmur registry, including authentication,
-    artifact publishing, and package index management.
+    artifact publishing, and artifact index management.
 
     Args:
         verbose (bool, optional): Enable verbose logging. Defaults to False.
@@ -163,8 +163,8 @@ class PublicRegistryAdapter(RegistryAdapter):
             )
         if 'Could not validate credentials' in error_message:
             raise MurError(502, 'Could not validate credentials')
-        if 'The package or file already exists in the feed' in error_message:
-            raise MurError(302, 'Package with version already exists')
+        if 'The artifact or file already exists in the feed' in error_message:
+            raise MurError(302, 'Artifact with version already exists')
 
         # Map standard HTTP status codes
         STATUS_CODE_MAPPING = {
@@ -185,14 +185,14 @@ class PublicRegistryAdapter(RegistryAdapter):
 
         raise MurError(error_code, error_detail)
 
-    def get_package_indexes(self) -> list[str]:
-        """Get package indexes from .murmurrc configuration.
+    def get_artifact_indexes(self) -> list[str]:
+        """Get artifact indexes from .murmurrc configuration.
 
         Reads the primary index URL and any additional index URLs from the .murmurrc
         configuration file. Falls back to the default index if configuration cannot be read.
 
         Returns:
-            list[str]: List of package index URLs with primary index first.
+            list[str]: List of artifact index URLs with primary index first.
         """
         try:
             # Get the path to the .murmurrc file

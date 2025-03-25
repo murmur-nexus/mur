@@ -61,7 +61,7 @@ class PublishCommand(ArtifactCommand):
             artifact_files (list[str]): List of artifact files to publish
 
         Raises:
-            MurError: If package names don't match normalized format
+            MurError: If artifact names don't match normalized format
         """
         try:
             if self.verbose:
@@ -197,7 +197,7 @@ class PublishCommand(ArtifactCommand):
 
         This method orchestrates the publishing process including:
         1. Determining the appropriate registry
-        2. Finding the previously built package files
+        2. Finding the previously built artifact files
         3. Publishing the files
 
         Raises:
@@ -208,7 +208,7 @@ class PublishCommand(ArtifactCommand):
             dist_dir, artifact_files = self._find_artifact_files()
             self.scope = self._get_valid_scope(artifact_files)
 
-            # Publish package files
+            # Publish artifact files
             self._publish_files(dist_dir, artifact_files)
 
             normalized_artifact_name = normalize_artifact_name(self.manifest.name)
