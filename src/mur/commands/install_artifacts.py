@@ -111,7 +111,7 @@ class InstallArtifactCommand(ArtifactCommand):
 
             index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
             artifact_url = f'{index_url}/{artifact_name}'
-            
+
             try:
                 response = self._request_tool_installation(artifact_name, artifact_url)
                 self._display_installation_results(response, artifact_spec)
@@ -125,14 +125,14 @@ class InstallArtifactCommand(ArtifactCommand):
 
     def _request_tool_installation(self, artifact_name: str, artifact_url: str):
         """Send installation request to the capsule client.
-        
+
         Args:
             artifact_name: Name of the artifact to install
             artifact_url: URL for the artifact
-            
+
         Returns:
             The response from the capsule client
-            
+
         Raises:
             MurError: If the installation request fails or if CapsuleClient isn't initialized
         """
@@ -142,7 +142,7 @@ class InstallArtifactCommand(ArtifactCommand):
                 message='CapsuleClient not initialized',
                 detail='Trying to use host installation but CapsuleClient is not initialized.',
             )
-        
+
         response = self.capsule_client.install_tool(tool_name=artifact_name, artifact_url=artifact_url)
 
         # Check response status to determine success/failure
@@ -152,12 +152,12 @@ class InstallArtifactCommand(ArtifactCommand):
                 message=f'Failed to install {artifact_name} via host',
                 detail=f'Host returned error: {response.status_code} - {response.error or "Unknown error"}',
             )
-            
+
         return response
 
     def _display_installation_results(self, response, artifact_spec: str) -> None:
         """Display the results of a tool installation.
-        
+
         Args:
             response: The response from the capsule client
             artifact_spec: The artifact specification string
@@ -166,7 +166,7 @@ class InstallArtifactCommand(ArtifactCommand):
         if not response.raw_data:
             self.log_success(f'Successfully installed {artifact_spec}')
             return
-            
+
         # Display main message
         message = response.raw_data.get('message', 'Installation successful')
         self.log_success(f'{artifact_spec}: {message}')

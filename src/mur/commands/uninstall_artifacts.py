@@ -3,13 +3,16 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 import click
 
 from mur.commands.base import ArtifactCommand
 from mur.utils.error_handler import MessageType, MurError
 
+from ..core.capsule_client import CapsuleClient
 from ..core.packaging import normalize_artifact_name
+from ..utils.loading import Spinner
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +25,18 @@ class UninstallArtifactCommand(ArtifactCommand):
         verbose (bool): Whether to enable verbose logging output.
     """
 
-    def __init__(self, artifact_name: str | None, verbose: bool = False) -> None:
+    def __init__(self, artifact_name: str | None, verbose: bool = False, host: Optional[str] = None) -> None:
         """Initialize uninstall command.
 
         Args:
             artifact_name: Name of the artifact to uninstall, or None to uninstall from manifest
             verbose: Whether to enable verbose output
+            host: Optional host URL for using CapsuleClient instead of direct uninstallation
         """
         super().__init__('uninstall', verbose)
         self.artifact_name = artifact_name
+        self.host = host
+        self.capsule_client = CapsuleClient(base_url=host) if host else None
 
     def _get_installed_artifacts(self) -> list[dict[str, str]]:
         """Get list of installed artifacts from pip.
@@ -70,7 +76,7 @@ class UninstallArtifactCommand(ArtifactCommand):
         return None
 
     def _uninstall_artifact(self, artifact_name: str) -> None:
-        """Uninstall a artifact using pip.
+        """Uninstall a artifact using pip or capsule client.
 
         Args:
             artifact_name: Name of the artifact to uninstall.
@@ -79,6 +85,11 @@ class UninstallArtifactCommand(ArtifactCommand):
             MurError: If artifact check or uninstallation fails.
         """
         try:
+            # When using a host, use capsule client for uninstallation
+            if self.host:
+                self._uninstall_via_capsule(artifact_name)
+                return
+
             artifacts = self._get_installed_artifacts()
             if self.verbose:
                 logger.debug(f'Found installed artifacts: {[p["name"] for p in artifacts]}')
@@ -107,6 +118,96 @@ class UninstallArtifactCommand(ArtifactCommand):
             if not isinstance(e, MurError):
                 raise MurError(code=309, message=f'Failed to process {artifact_name}', original_error=str(e))
             raise
+
+    def _uninstall_via_capsule(self, artifact_name: str) -> None:
+        """Uninstall artifact using the capsule client.
+
+        Args:
+            artifact_name: Name of the artifact to uninstall
+
+        Raises:
+            MurError: If uninstallation via capsule client fails
+        """
+        # Ensure capsule_client is initialized
+        if not self.capsule_client:
+            raise MurError(
+                code=312,
+                message='Capsule Client not initialized',
+                detail='Trying to use host uninstallation but CapsuleClient is not initialized.',
+            )
+
+        with Spinner() as spinner:
+            if not self.verbose:
+                spinner.start(f'Uninstalling {artifact_name} via host {self.host}')
+
+            try:
+                response = self.capsule_client.uninstall_tool(tool_name=artifact_name)
+
+                if self.verbose:
+                    logger.debug(f'Response status: {response.status_code}')
+                    logger.debug(f'Response data: {response.raw_data}')
+                    logger.debug(f'Response error: {response.error}')
+
+                # Handle error responses
+                if response.status_code >= 400:
+                    # If it's a 404, the tool was likely not installed
+                    if response.status_code == 404:
+                        if self.verbose:
+                            logger.info(f'Tool {artifact_name} is not installed on remote host')
+                        return
+
+                    # Use error from response or a default message
+                    error_message = response.error or f'HTTP {response.status_code}'
+
+                    raise MurError(
+                        code=608,
+                        message=f'Failed to uninstall {artifact_name} via host',
+                        detail=f'Host returned error: {error_message}',
+                    )
+
+                # Display results
+                self._display_uninstallation_results(response, artifact_name)
+
+            except Exception as e:
+                if self.verbose:
+                    logger.error(f'Uninstall error: {e!s}')
+
+                if not isinstance(e, MurError):
+                    raise MurError(
+                        code=311,
+                        message=f'Failed to communicate with host for uninstalling {artifact_name}',
+                        detail='Error occurred while sending uninstall request to the host.',
+                        original_error=e,
+                    )
+                raise
+
+    def _display_uninstallation_results(self, response, artifact_name: str) -> None:
+        """Display the results of a tool uninstallation.
+
+        Args:
+            response: The response from the capsule client
+            artifact_name: The artifact name
+        """
+        # Access raw_data to display results
+        if not response.raw_data:
+            self.log_success(f'Successfully uninstalled {artifact_name}')
+            return
+
+        # Try to get message from different potential fields
+        message = response.raw_data.get('message') or response.raw_data.get('result') or 'Uninstallation successful'
+        status = response.raw_data.get('status', 'success')
+
+        # Display based on status
+        if status.lower() == 'success':
+            self.log_success(f'{artifact_name}: {message}')
+        else:
+            click.echo(click.style(f'{artifact_name}: {message}', fg='yellow'))
+
+        # Show any warnings
+        if warnings := response.raw_data.get('warnings', []):
+            click.echo(click.style('Warnings:', fg='yellow'))
+            for warning in warnings:
+                click.echo(click.style(f'  ! {warning}', fg='yellow'))
 
     def _remove_from_init_file(self, artifact_name: str) -> None:
         """Remove artifact import from artifacts/__init__.py if it exists.
@@ -194,6 +295,12 @@ class UninstallArtifactCommand(ArtifactCommand):
             self._uninstall_artifact(artifact_name)
             self._remove_from_init_file(artifact_name)
 
+            # Only show success message if uninstallation completed without errors
+            self.log_success(f'Successfully uninstalled {artifact_name}')
+
+        except MurError:
+            # Re-raise MurErrors directly without wrapping them again
+            raise
         except Exception as e:
             raise MurError(code=309, message=f'Failed to uninstall {artifact_name}', original_error=e)
 
@@ -207,10 +314,12 @@ class UninstallArtifactCommand(ArtifactCommand):
             if self.artifact_name:
                 # Single artifact uninstall
                 self._uninstall_single_artifact(self.artifact_name)
-                click.echo(click.style(f'Successfully uninstalled {self.artifact_name}', fg='green'))
             else:
                 # Bulk uninstall from manifest
                 self._uninstall_from_manifest()
+        except MurError:
+            # Re-raise MurErrors directly without wrapping them again
+            raise
         except Exception as e:
             raise MurError(code=309, message='Uninstallation failed', original_error=e)
 
@@ -225,20 +334,28 @@ def uninstall_command() -> click.Command:
     @click.command()
     @click.argument('artifact_name', required=False)
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def uninstall(artifact_name: str | None, verbose: bool) -> None:
+    @click.option('--host', help='Host URL to use for uninstallation via CapsuleClient')
+    def uninstall(artifact_name: str | None, verbose: bool, host: str | None) -> None:
         """Uninstall a artifact or all artifacts from murmur.yaml.
 
         If artifact_name is provided, uninstalls that specific artifact.
         If no artifact_name is provided, attempts to uninstall all artifacts from murmur.yaml.
 
+        Usage patterns:
+        - mur uninstall                # Uninstall all artifacts from murmur.yaml
+        - mur uninstall my-artifact    # Uninstall a specific artifact
+        - mur uninstall --host URL     # Uninstall using remote host
+        - mur uninstall my-artifact --host URL  # Uninstall specific artifact using remote host
+
         Args:
             artifact_name: Optional name of the artifact to uninstall.
             verbose: Whether to enable verbose output.
+            host: Optional host URL for using CapsuleClient instead of direct uninstallation.
 
         Raises:
             MurError: If the uninstallation process fails.
         """
-        cmd = UninstallArtifactCommand(artifact_name, verbose)
+        cmd = UninstallArtifactCommand(artifact_name, verbose, host)
         cmd.execute()
 
     return uninstall
