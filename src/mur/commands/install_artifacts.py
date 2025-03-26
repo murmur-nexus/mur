@@ -5,11 +5,13 @@ import subprocess
 import sys
 import sysconfig
 from pathlib import Path
+from typing import Optional
 
 import click
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError, RequestException, Timeout
 
+from ..core.capsule_client import CapsuleClient
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
 from .base import ArtifactCommand
@@ -24,13 +26,16 @@ class InstallArtifactCommand(ArtifactCommand):
     a murmur.yaml manifest file.
     """
 
-    def __init__(self, verbose: bool = False) -> None:
+    def __init__(self, verbose: bool = False, host: Optional[str] = None) -> None:
         """Initialize install command.
 
         Args:
             verbose: Whether to enable verbose output
+            host: Optional host URL for using CapsuleClient instead of direct installation
         """
         super().__init__('install', verbose)
+        self.host = host
+        self.capsule_client = CapsuleClient(base_url=host) if host else None
 
     def _get_murmur_artifacts_dir(self) -> Path:
         """Get the murmur artifacts directory path.
@@ -61,22 +66,19 @@ class InstallArtifactCommand(ArtifactCommand):
             return False
 
     def _install_artifact(self, artifact_name: str, version: str) -> None:
-        """Install a artifact using pip with configured index URLs."""
+        """Install a artifact using pip with configured index URLs or via capsule client."""
         try:
             artifact_spec = artifact_name if version.lower() in ['latest', ''] else f'{artifact_name}=={version}'
 
-            # Check if artifact is already installed
-            if self._is_artifact_installed(artifact_name, version):
-                logger.info(f'Skipping {artifact_spec} - already installed')
-                return
-
-            index_url, extra_index_urls = self._get_index_urls_from_murmurrc(self.murmurrc_path)
-
-            with Spinner() as spinner:
-                if not self.verbose:
-                    spinner.start(f'Installing {artifact_spec}')
-
-                self._handle_artifact_installation(artifact_spec, artifact_name, index_url, extra_index_urls)
+            # When using a host, skip local installation check
+            if self.host:
+                self._install_via_capsule(artifact_name, artifact_spec)
+            else:
+                # Check if artifact is already installed locally
+                if self._is_artifact_installed(artifact_name, version):
+                    logger.info(f'Skipping {artifact_spec} - already installed')
+                    return
+                self._install_via_pip(artifact_name, artifact_spec)
 
         except MurError:
             raise
@@ -87,6 +89,114 @@ class InstallArtifactCommand(ArtifactCommand):
                 detail='An unexpected error occurred during artifact installation.',
                 original_error=e,
             )
+
+    def _install_via_capsule(self, artifact_name: str, artifact_spec: str) -> None:
+        """Install artifact using the capsule client.
+
+        Args:
+            artifact_name: Name of the artifact
+            artifact_spec: Full artifact specification (may include version)
+        """
+        # Ensure capsule_client is initialized
+        if not self.capsule_client:
+            raise MurError(
+                code=312,
+                message='CapsuleClient not initialized',
+                detail='Trying to use host installation but CapsuleClient is not initialized.',
+            )
+
+        with Spinner() as spinner:
+            if not self.verbose:
+                spinner.start(f'Installing {artifact_spec} via host {self.host}')
+
+            index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
+            artifact_url = f'{index_url}/{artifact_name}'
+            
+            try:
+                response = self._request_tool_installation(artifact_name, artifact_url)
+                self._display_installation_results(response, artifact_spec)
+            except Exception as e:
+                raise MurError(
+                    code=311,
+                    message=f'Failed to communicate with host for {artifact_name}',
+                    detail='Error occurred while sending install request to the host.',
+                    original_error=e,
+                )
+
+    def _request_tool_installation(self, artifact_name: str, artifact_url: str):
+        """Send installation request to the capsule client.
+        
+        Args:
+            artifact_name: Name of the artifact to install
+            artifact_url: URL for the artifact
+            
+        Returns:
+            The response from the capsule client
+            
+        Raises:
+            MurError: If the installation request fails or if CapsuleClient isn't initialized
+        """
+        if not self.capsule_client:
+            raise MurError(
+                code=607,
+                message='CapsuleClient not initialized',
+                detail='Trying to use host installation but CapsuleClient is not initialized.',
+            )
+        
+        response = self.capsule_client.install_tool(tool_name=artifact_name, artifact_url=artifact_url)
+
+        # Check response status to determine success/failure
+        if response.status_code >= 400:
+            raise MurError(
+                code=608,
+                message=f'Failed to install {artifact_name} via host',
+                detail=f'Host returned error: {response.status_code} - {response.error or "Unknown error"}',
+            )
+            
+        return response
+
+    def _display_installation_results(self, response, artifact_spec: str) -> None:
+        """Display the results of a tool installation.
+        
+        Args:
+            response: The response from the capsule client
+            artifact_spec: The artifact specification string
+        """
+        # Access raw_data instead of trying to use the ToolResponse object
+        if not response.raw_data:
+            self.log_success(f'Successfully installed {artifact_spec}')
+            return
+            
+        # Display main message
+        message = response.raw_data.get('message', 'Installation successful')
+        self.log_success(f'{artifact_spec}: {message}')
+
+        # Show installed tools
+        if tools := response.raw_data.get('tools', []):
+            click.echo('Installed tools:')
+            for tool in tools:
+                click.echo(f'  ✓ {tool}')
+
+        # Show any warnings
+        if warnings := response.raw_data.get('warnings', []):
+            click.echo(click.style('Warnings:', fg='yellow'))
+            for warning in warnings:
+                click.echo(click.style(f'  ! {warning}', fg='yellow'))
+
+    def _install_via_pip(self, artifact_name: str, artifact_spec: str) -> None:
+        """Install artifact using pip.
+
+        Args:
+            artifact_name: Name of the artifact
+            artifact_spec: Full artifact specification (may include version)
+        """
+        index_url, extra_index_urls = self._get_index_urls_from_murmurrc(self.murmurrc_path)
+
+        with Spinner() as spinner:
+            if not self.verbose:
+                spinner.start(f'Installing {artifact_spec}')
+
+            self._handle_artifact_installation(artifact_spec, artifact_name, index_url, extra_index_urls)
 
     def _handle_artifact_installation(
         self, artifact_spec: str, artifact_name: str, index_url: str, extra_index_urls: list[str]
@@ -329,14 +439,17 @@ def install_command() -> click.Command:
     @click.command()
     @click.argument('artifact_name', required=False)
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def install(artifact_name: str | None, verbose: bool) -> None:
+    @click.option('--host', help='Host URL to use for installation via CapsuleClient')
+    def install(artifact_name: str | None, verbose: bool, host: str | None) -> None:
         """Install artifacts from murmur.yaml or a specific artifact.
 
         Usage patterns:
         - mur install                 # Install all artifacts from murmur.yaml
         - mur install my-artifact     # Install a specific artifact
+        - mur install --host URL      # Install using remote host
+        - mur install my-artifact --host URL  # Install specific artifact using remote host
         """
-        cmd = InstallArtifactCommand(verbose)
+        cmd = InstallArtifactCommand(verbose, host)
         cmd._murmur_must_be_installed()
 
         # Case 1: No arguments - install from manifest

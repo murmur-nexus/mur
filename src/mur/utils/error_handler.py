@@ -113,6 +113,8 @@ class MurError(Exception):
         604: 'Invalid Version Specification',
         605: 'Unsupported Artifact Format',
         606: 'Invalid Remote Metadata',
+        607: 'Client Not Initialized',
+        608: 'Host Installation Failed',
         # Category 8: Network Operations
         800: 'General Connection Error',
         801: 'Connection Unavailable',
