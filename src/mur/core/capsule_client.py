@@ -17,7 +17,7 @@ class ToolInstallRequest(BaseModel):
 
     Attributes:
         tool_name: Name of the tool to install
-        artifact_url: URL to the tool artifact (e.g., wheel file)
+        artifact_url: URL to the tool artifact (e.g., distribution file)
         metadata: Additional metadata for the tool
     """
 
@@ -65,7 +65,7 @@ class ToolResponse(BaseModel):
 
 
 class CapsuleClient:
-    """Client for interacting with tool/capsule operations.
+    """Client for interacting with capsule operations.
 
     This client provides methods for installing, uninstalling, and calling tools
     through the Murmur API.
@@ -96,12 +96,12 @@ class CapsuleClient:
         artifact_url: Optional[str] = None,
         package_path: Optional[Union[str, Path]] = None,
     ) -> ApiResponse[ToolResponse]:
-        """Install a tool from a wheel file or artifact URL.
+        """Install a tool from a distribution file or artifact URL.
 
         Args:
             tool_name: Name of the tool to install (when using artifact_url)
             artifact_url: URL to the artifact package
-            package_path: Path to the wheel file to install
+            package_path: Path to the distribution file to install
 
         Returns:
             ApiResponse: Standardized response with tool installation result
@@ -109,65 +109,92 @@ class CapsuleClient:
         Raises:
             MurError: If the installation fails
         """
-        # If package_path is provided, use the file upload approach
+        # If package_path is provided, use push approach
         if package_path:
-            package_path = Path(package_path)
-            if not package_path.exists():
-                raise MurError(
-                    code=400,
-                    message=f'Package file not found: {package_path}',
-                    detail='The specified wheel file does not exist',
-                )
-
-            try:
-                url = f'{self.base_url}/api/tools/install'
-
-                with open(package_path, 'rb') as f:
-                    files = {'file': (package_path.name, f)}
-                    response = requests.post(url, files=files, timeout=DEFAULT_TIMEOUT)
-
-                # Process the response similar to ApiClient
-                if response.status_code == 200 and response.content:
-                    try:
-                        response_json = response.json()
-                        parsed_data = ToolResponse(**response_json)
-                        return ApiResponse(
-                            status_code=response.status_code, data=parsed_data, raw_data=response_json, error=None
-                        )
-                    except Exception as e:
-                        logger.debug(f'Failed to parse response data: {e}')
-                        return ApiResponse(
-                            status_code=response.status_code,
-                            raw_data={} if not response.content else response.json(),
-                            error=f'Failed to parse response: {e}',
-                        )
-                else:
-                    return ApiResponse(
-                        status_code=response.status_code,
-                        raw_data={} if not response.content else response.json(),
-                        error=response.text if response.status_code >= 400 else None,
-                    )
-
-            except Exception as e:
-                logger.debug(f'Install tool request error: {e}')
-                raise MurError(
-                    code=600,
-                    message='Tool installation failed',
-                    detail=f'Failed to upload wheel file: {e}',
-                    original_error=e,
-                )
-
-        # If artifact_url is provided, use that approach
+            return self._install_tool_from_path(package_path)
+        # If artifact_url is provided, use pull approach
         elif artifact_url:
-            payload = ToolInstallRequest(artifact_url=artifact_url)
-            return self.api_client.post(endpoint='/api/tools/install', payload=payload, response_model=ToolResponse)
-
+            return self._install_tool_from_url(artifact_url, tool_name)
         else:
             raise MurError(
                 code=401,
                 message='Missing installation source',
                 detail='Either package_path or artifact_url must be provided',
             )
+
+    def _install_tool_from_path(self, package_path: Union[str, Path]) -> ApiResponse[ToolResponse]:
+        """Install a tool by uploading a local package file (push approach).
+
+        Args:
+            package_path: Path to the distribution file to install
+
+        Returns:
+            ApiResponse: Standardized response with tool installation result
+
+        Raises:
+            MurError: If the installation fails
+        """
+        package_path = Path(package_path)
+        if not package_path.exists():
+            raise MurError(
+                code=201,
+                message=f'Artifact file not found: {package_path}',
+                detail='The specified distribution file does not exist',
+            )
+
+        try:
+            url = f'{self.base_url}/api/tools/install'
+
+            with open(package_path, 'rb') as f:
+                files = {'file': (package_path.name, f)}
+                response = requests.post(url, files=files, timeout=DEFAULT_TIMEOUT)
+
+            # Process the response similar to ApiClient
+            if response.status_code == 200 and response.content:
+                try:
+                    response_json = response.json()
+                    parsed_data = ToolResponse(**response_json)
+                    return ApiResponse(
+                        status_code=response.status_code, data=parsed_data, raw_data=response_json, error=None
+                    )
+                except Exception as e:
+                    logger.debug(f'Failed to parse response data: {e}')
+                    return ApiResponse(
+                        status_code=response.status_code,
+                        raw_data={} if not response.content else response.json(),
+                        error=f'Failed to parse response: {e}',
+                    )
+            else:
+                return ApiResponse(
+                    status_code=response.status_code,
+                    raw_data={} if not response.content else response.json(),
+                    error=response.text if response.status_code >= 400 else None,
+                )
+
+        except Exception as e:
+            logger.debug(f'Install tool request error: {e}')
+            raise MurError(
+                code=600,
+                message='Tool installation failed',
+                detail=f'Failed to upload distribution file: {e}',
+                original_error=e,
+            )
+
+    def _install_tool_from_url(self, artifact_url: str, tool_name: Optional[str] = None) -> ApiResponse[ToolResponse]:
+        """Install a tool from a remote artifact URL (pull approach).
+
+        Args:
+            artifact_url: URL to the artifact package
+            tool_name: Optional name of the tool to install
+
+        Returns:
+            ApiResponse: Standardized response with tool installation result
+
+        Raises:
+            MurError: If the installation fails
+        """
+        payload = ToolInstallRequest(artifact_url=artifact_url)
+        return self.api_client.post(endpoint='/api/tools/install', payload=payload, response_model=ToolResponse)
 
     def uninstall_tool(self, tool_name: str) -> ApiResponse[ToolResponse]:
         """Uninstall a tool.

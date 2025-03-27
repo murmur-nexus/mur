@@ -70,7 +70,7 @@ class InstallArtifactCommand(ArtifactCommand):
         try:
             artifact_spec = artifact_name if version.lower() in ['latest', ''] else f'{artifact_name}=={version}'
 
-            # When using a host, skip local installation check
+            # Skip installation check when using a host
             if self.host:
                 self._install_via_capsule(artifact_name, artifact_spec)
             else:
@@ -84,7 +84,7 @@ class InstallArtifactCommand(ArtifactCommand):
             raise
         except Exception as e:
             raise MurError(
-                code=300,
+                code=302,
                 message=f'Failed to install {artifact_name}',
                 detail='An unexpected error occurred during artifact installation.',
                 original_error=e,
@@ -97,31 +97,36 @@ class InstallArtifactCommand(ArtifactCommand):
             artifact_name: Name of the artifact
             artifact_spec: Full artifact specification (may include version)
         """
-        # Ensure capsule_client is initialized
-        if not self.capsule_client:
-            raise MurError(
-                code=312,
-                message='CapsuleClient not initialized',
-                detail='Trying to use host installation but CapsuleClient is not initialized.',
-            )
+        response = None
+        index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
+        artifact_url = f'{index_url}/{artifact_name}'
 
-        with Spinner() as spinner:
-            if not self.verbose:
+        if not self.verbose:
+            with Spinner() as spinner:
                 spinner.start(f'Installing {artifact_spec} via host {self.host}')
-
-            index_url, _ = self._get_index_urls_from_murmurrc(self.murmurrc_path)
-            artifact_url = f'{index_url}/{artifact_name}'
-
+                try:
+                    response = self._request_tool_installation(artifact_name, artifact_url)
+                except Exception as e:
+                    raise MurError(
+                        code=608,
+                        message=f'Failed to communicate with host for {artifact_name}',
+                        detail='Error occurred while sending install request to the host.',
+                        original_error=e,
+                    )
+        else:
             try:
                 response = self._request_tool_installation(artifact_name, artifact_url)
-                self._display_installation_results(response, artifact_spec)
             except Exception as e:
                 raise MurError(
-                    code=311,
+                    code=608,
                     message=f'Failed to communicate with host for {artifact_name}',
                     detail='Error occurred while sending install request to the host.',
                     original_error=e,
                 )
+
+        # Display results after installation
+        if response:
+            self._display_installation_results(response, artifact_spec)
 
     def _request_tool_installation(self, artifact_name: str, artifact_url: str):
         """Send installation request to the capsule client.
@@ -134,16 +139,9 @@ class InstallArtifactCommand(ArtifactCommand):
             The response from the capsule client
 
         Raises:
-            MurError: If the installation request fails or if CapsuleClient isn't initialized
+            MurError: If the installation request fails
         """
-        if not self.capsule_client:
-            raise MurError(
-                code=607,
-                message='CapsuleClient not initialized',
-                detail='Trying to use host installation but CapsuleClient is not initialized.',
-            )
-
-        response = self.capsule_client.install_tool(tool_name=artifact_name, artifact_url=artifact_url)
+        response = self.capsule_client.install_tool(tool_name=artifact_name, artifact_url=artifact_url)  # type: ignore
 
         # Check response status to determine success/failure
         if response.status_code >= 400:
@@ -162,22 +160,27 @@ class InstallArtifactCommand(ArtifactCommand):
             response: The response from the capsule client
             artifact_spec: The artifact specification string
         """
-        # Access raw_data instead of trying to use the ToolResponse object
         if not response.raw_data:
-            self.log_success(f'Successfully installed {artifact_spec}')
             return
 
-        # Display main message
-        message = response.raw_data.get('message', 'Installation successful')
-        self.log_success(f'{artifact_spec}: {message}')
+        status = response.raw_data.get('status', 'success')
 
-        # Show installed tools
+        # Only display messages for non-success results
+        if status.lower() != 'success':
+            message = response.raw_data.get('message') or response.raw_data.get('result') or 'Installation had issues'
+            click.echo(click.style(f'{artifact_spec}: {message}', fg='yellow'))
+
         if tools := response.raw_data.get('tools', []):
-            click.echo('Installed tools:')
-            for tool in tools:
-                click.echo(f'  ✓ {tool}')
+            if len(tools) == 1:
+                # Single tool case
+                click.echo(f'Found tool 🔧 {tools[0]}')
+            else:
+                # Multiple tools case
+                click.echo(f'Found toolkit 🧰 with {len(tools)} tools:')
+                for tool in tools:
+                    click.echo(f'  🔧 {tool}')
 
-        # Show any warnings
+        # Show tool installation any warnings
         if warnings := response.raw_data.get('warnings', []):
             click.echo(click.style('Warnings:', fg='yellow'))
             for warning in warnings:
@@ -413,8 +416,6 @@ class InstallArtifactCommand(ArtifactCommand):
             self._murmur_must_be_installed()
 
             manifest = self._load_murmur_yaml_from_current_dir()
-
-            # Install all artifacts (agents and tools) to the unified location
             artifacts = []
 
             # Collect all artifacts from the manifest

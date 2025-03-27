@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import logging
 import subprocess
@@ -128,45 +129,27 @@ class UninstallArtifactCommand(ArtifactCommand):
         Raises:
             MurError: If uninstallation via capsule client fails
         """
-        # Ensure capsule_client is initialized
-        if not self.capsule_client:
-            raise MurError(
-                code=312,
-                message='Capsule Client not initialized',
-                detail='Trying to use host uninstallation but CapsuleClient is not initialized.',
-            )
+        response = None
 
         with Spinner() as spinner:
             if not self.verbose:
                 spinner.start(f'Uninstalling {artifact_name} via host {self.host}')
 
             try:
-                response = self.capsule_client.uninstall_tool(tool_name=artifact_name)
+                response = self.capsule_client.uninstall_tool(tool_name=artifact_name)  # type: ignore
 
                 if self.verbose:
                     logger.debug(f'Response status: {response.status_code}')
                     logger.debug(f'Response data: {response.raw_data}')
                     logger.debug(f'Response error: {response.error}')
 
-                # Handle error responses
                 if response.status_code >= 400:
-                    # If it's a 404, the tool was likely not installed
-                    if response.status_code == 404:
-                        if self.verbose:
-                            logger.info(f'Tool {artifact_name} is not installed on remote host')
-                        return
-
-                    # Use error from response or a default message
                     error_message = response.error or f'HTTP {response.status_code}'
-
                     raise MurError(
                         code=608,
                         message=f'Failed to uninstall {artifact_name} via host',
                         detail=f'Host returned error: {error_message}',
                     )
-
-                # Display results
-                self._display_uninstallation_results(response, artifact_name)
 
             except Exception as e:
                 if self.verbose:
@@ -174,12 +157,16 @@ class UninstallArtifactCommand(ArtifactCommand):
 
                 if not isinstance(e, MurError):
                     raise MurError(
-                        code=311,
+                        code=608,
                         message=f'Failed to communicate with host for uninstalling {artifact_name}',
                         detail='Error occurred while sending uninstall request to the host.',
                         original_error=e,
                     )
                 raise
+
+        # Display results after spinner is stopped
+        if response:
+            self._display_uninstallation_results(response, artifact_name)
 
     def _display_uninstallation_results(self, response, artifact_name: str) -> None:
         """Display the results of a tool uninstallation.
@@ -190,17 +177,14 @@ class UninstallArtifactCommand(ArtifactCommand):
         """
         # Access raw_data to display results
         if not response.raw_data:
-            self.log_success(f'Successfully uninstalled {artifact_name}')
-            return
+            return  # Don't display anything for success case
 
-        # Try to get message from different potential fields
-        message = response.raw_data.get('message') or response.raw_data.get('result') or 'Uninstallation successful'
+        # Get status and only show non-success messages
         status = response.raw_data.get('status', 'success')
 
-        # Display based on status
-        if status.lower() == 'success':
-            self.log_success(f'{artifact_name}: {message}')
-        else:
+        # Only display messages for non-success results
+        if status.lower() != 'success':
+            message = response.raw_data.get('message') or response.raw_data.get('result') or 'Uninstallation had issues'
             click.echo(click.style(f'{artifact_name}: {message}', fg='yellow'))
 
         # Show any warnings
@@ -216,8 +200,6 @@ class UninstallArtifactCommand(ArtifactCommand):
             artifact_name (str): Name of the artifact whose import should be removed.
         """
         try:
-            import importlib.util
-
             # Get the path to the namespace artifact
             spec = importlib.util.find_spec('murmur')
             if spec is None or not spec.submodule_search_locations:
