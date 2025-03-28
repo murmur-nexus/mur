@@ -1,3 +1,4 @@
+import configparser
 import importlib.metadata
 import importlib.util
 import logging
@@ -18,6 +19,10 @@ from .base import ArtifactCommand
 
 logger = logging.getLogger(__name__)
 
+# Config section constants
+PUBLIC_CONFIG_SECTION = 'murmur-nexus'
+PRIVATE_CONFIG_SECTION = 'murmur-private'
+
 
 class InstallArtifactCommand(ArtifactCommand):
     """Handles artifact installation.
@@ -34,8 +39,30 @@ class InstallArtifactCommand(ArtifactCommand):
             host: Optional host URL for using CapsuleClient instead of direct installation
         """
         super().__init__('install', verbose)
-        self.host = host
-        self.capsule_client = CapsuleClient(base_url=host) if host else None
+        self.host = host or self._get_host_from_config()
+        self.capsule_client = CapsuleClient(base_url=self.host) if self.host else None
+
+    def _get_host_from_config(self) -> Optional[str]:
+        """Get host URL from configuration file.
+
+        Returns:
+            Optional[str]: Host URL if found in config, None otherwise
+        """
+        try:
+            # Determine which config section to use based on registry type
+            section = PRIVATE_CONFIG_SECTION if self.is_private_registry else PUBLIC_CONFIG_SECTION
+
+            config = configparser.ConfigParser()
+            config.read(self.murmurrc_path)
+
+            # Only look in the appropriate section
+            if section in config and 'host' in config[section]:
+                return config[section]['host']
+
+            return None
+        except Exception as e:
+            logger.debug(f'Failed to read host from config: {e}')
+            return None
 
     def _get_murmur_artifacts_dir(self) -> Path:
         """Get the murmur artifacts directory path.
@@ -173,10 +200,10 @@ class InstallArtifactCommand(ArtifactCommand):
         if tools := response.raw_data.get('tools', []):
             if len(tools) == 1:
                 # Single tool case
-                click.echo(f'Found tool 🔧 {tools[0]}')
+                click.echo(f'Added tool 🔧 {tools[0]}')
             else:
                 # Multiple tools case
-                click.echo(f'Found toolkit 🧰 with {len(tools)} tools:')
+                click.echo(f'Added toolkit 🧰 with {len(tools)} tools:')
                 for tool in tools:
                     click.echo(f'  🔧 {tool}')
 
@@ -396,6 +423,14 @@ class InstallArtifactCommand(ArtifactCommand):
             artifact_name: Name of the artifact to install
         """
         try:
+            # If using host mode, verify host is available
+            if self.host is None and '--host' in sys.argv:
+                raise MurError(
+                    code=609,
+                    message='No host specified for artifact installation',
+                    detail='The install command with --host flag requires a host to be specified via --host URL or found in configuration.',
+                )
+
             # Install the artifact with latest version
             self._install_artifact(artifact_name, 'latest')
             self._update_init_file(artifact_name)
@@ -412,6 +447,14 @@ class InstallArtifactCommand(ArtifactCommand):
         installs all specified agents and tools.
         """
         try:
+            # If using host mode, verify host is available
+            if self.host is None and '--host' in sys.argv:
+                raise MurError(
+                    code=609,
+                    message='No host specified for artifact installation',
+                    detail='The install command with --host flag requires a host to be specified via --host URL or found in configuration.',
+                )
+
             # Check for murmur artifact first
             self._murmur_must_be_installed()
 
@@ -440,7 +483,9 @@ def install_command() -> click.Command:
     @click.command()
     @click.argument('artifact_name', required=False)
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    @click.option('--host', help='Host URL to use for installation via CapsuleClient')
+    @click.option(
+        '--host', is_flag=False, flag_value='from_config', help='Host URL to use for installation via CapsuleClient'
+    )
     def install(artifact_name: str | None, verbose: bool, host: str | None) -> None:
         """Install artifacts from murmur.yaml or a specific artifact.
 
@@ -448,8 +493,14 @@ def install_command() -> click.Command:
         - mur install                 # Install all artifacts from murmur.yaml
         - mur install my-artifact     # Install a specific artifact
         - mur install --host URL      # Install using remote host
+        - mur install --host          # Install using host from config
         - mur install my-artifact --host URL  # Install specific artifact using remote host
         """
+        # Only convert flag_value to None when it's the default flag_value
+        # Otherwise, keep the specific host URL provided
+        if host == 'from_config':
+            host = None
+
         cmd = InstallArtifactCommand(verbose, host)
         cmd._murmur_must_be_installed()
 

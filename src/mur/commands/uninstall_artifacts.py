@@ -1,3 +1,4 @@
+import configparser
 import importlib.util
 import json
 import logging
@@ -16,6 +17,10 @@ from ..core.packaging import normalize_artifact_name
 from ..utils.loading import Spinner
 
 logger = logging.getLogger(__name__)
+
+# Config section constants
+PUBLIC_CONFIG_SECTION = 'murmur-nexus'
+PRIVATE_CONFIG_SECTION = 'murmur-private'
 
 
 class UninstallArtifactCommand(ArtifactCommand):
@@ -36,8 +41,30 @@ class UninstallArtifactCommand(ArtifactCommand):
         """
         super().__init__('uninstall', verbose)
         self.artifact_name = artifact_name
-        self.host = host
-        self.capsule_client = CapsuleClient(base_url=host) if host else None
+        self.host = host or self._get_host_from_config()
+        self.capsule_client = CapsuleClient(base_url=self.host) if self.host else None
+
+    def _get_host_from_config(self) -> Optional[str]:
+        """Get host URL from configuration file.
+
+        Returns:
+            Optional[str]: Host URL if found in config, None otherwise
+        """
+        try:
+            # Determine which config section to use based on registry type
+            section = PRIVATE_CONFIG_SECTION if self.is_private_registry else PUBLIC_CONFIG_SECTION
+
+            config = configparser.ConfigParser()
+            config.read(self.murmurrc_path)
+
+            # Only look in the appropriate section
+            if section in config and 'host' in config[section]:
+                return config[section]['host']
+
+            return None
+        except Exception as e:
+            logger.debug(f'Failed to read host from config: {e}')
+            return None
 
     def _get_installed_artifacts(self) -> list[dict[str, str]]:
         """Get list of installed artifacts from pip.
@@ -293,6 +320,14 @@ class UninstallArtifactCommand(ArtifactCommand):
             MurError: If the uninstallation process fails.
         """
         try:
+            # If using host mode, verify host is available
+            if self.host is None and '--host' in sys.argv:
+                raise MurError(
+                    code=609,
+                    message='No host specified for artifact uninstallation',
+                    detail='The uninstall command with --host flag requires a host to be specified via --host URL or found in configuration.',
+                )
+
             if self.artifact_name:
                 # Single artifact uninstall
                 self._uninstall_single_artifact(self.artifact_name)
@@ -316,7 +351,9 @@ def uninstall_command() -> click.Command:
     @click.command()
     @click.argument('artifact_name', required=False)
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    @click.option('--host', help='Host URL to use for uninstallation via CapsuleClient')
+    @click.option(
+        '--host', is_flag=False, flag_value='from_config', help='Host URL to use for uninstallation via CapsuleClient'
+    )
     def uninstall(artifact_name: str | None, verbose: bool, host: str | None) -> None:
         """Uninstall a artifact or all artifacts from murmur.yaml.
 
@@ -327,17 +364,18 @@ def uninstall_command() -> click.Command:
         - mur uninstall                # Uninstall all artifacts from murmur.yaml
         - mur uninstall my-artifact    # Uninstall a specific artifact
         - mur uninstall --host URL     # Uninstall using remote host
+        - mur uninstall --host         # Uninstall using host from config
         - mur uninstall my-artifact --host URL  # Uninstall specific artifact using remote host
-
-        Args:
-            artifact_name: Optional name of the artifact to uninstall.
-            verbose: Whether to enable verbose output.
-            host: Optional host URL for using CapsuleClient instead of direct uninstallation.
-
-        Raises:
-            MurError: If the uninstallation process fails.
         """
-        cmd = UninstallArtifactCommand(artifact_name, verbose, host)
-        cmd.execute()
+        try:
+            # Only convert flag_value to None when it's the default flag_value
+            # Otherwise, keep the specific host URL provided
+            if host == 'from_config':
+                host = None
+
+            cmd = UninstallArtifactCommand(artifact_name, verbose, host)
+            cmd.execute()
+        except MurError as e:
+            e.handle()
 
     return uninstall
