@@ -115,6 +115,8 @@ class MurError(Exception):
         606: 'Invalid Remote Metadata',
         607: 'Client Not Initialized',
         608: 'Host Installation Failed',
+        609: 'Missing Host Configuration',
+        610: 'Unsupported Host Type',
         # Category 8: Network Operations
         800: 'General Connection Error',
         801: 'Connection Unavailable',
@@ -186,3 +188,21 @@ class MurError(Exception):
         # Only exit for errors, continue execution for warnings and info
         if self.context.type == MessageType.ERROR:
             sys.exit(self.context.code)
+
+    def __str__(self) -> str:
+        """Return a string representation of the error.
+
+        Returns:
+            str: A formatted error message with code in brackets followed by detail
+        """
+        # Format as [CODE] Detail
+        if self.context.detail:
+            return f'[{self.context.code}] {self.context.detail}'
+
+        # If no detail, use message instead
+        if self.context.message:
+            return f'[{self.context.code}] {self.context.message}'
+
+        # Use the error description from the map as a last resort
+        error_description = self.ERROR_MAP.get(self.context.code, 'Unknown Error')
+        return f'[{self.context.code}] {error_description}'

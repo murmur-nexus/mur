@@ -229,3 +229,31 @@ class CapsuleClient:
         """
         payload = ToolCallRequest(tool_name=tool_name, args=args or [], kwargs=kwargs or {})
         return self.api_client.post(endpoint='/api/tools/call', payload=payload, response_model=ToolResponse)
+
+    def list_tools(self) -> ApiResponse[ToolResponse]:
+        """List all installed tools on the host.
+
+        Returns:
+            ApiResponse: Standardized response with the list of installed tools
+
+        Raises:
+            MurError: If the list request fails
+        """
+        try:
+            return self.api_client.get(endpoint='/api/tools/list', response_model=ToolResponse)
+        except MurError as e:
+            logger.debug(f'List tools request error: {e}')
+            raise MurError(
+                code=610,
+                message='Failed to list tools',
+                detail=f'Error occurred while requesting tools list: {e}',
+                original_error=e.context.original_error,
+            )
+        except Exception as e:
+            logger.debug(f'List tools request error: {e}')
+            raise MurError(
+                code=610,
+                message='Failed to list tools',
+                detail=f'Error occurred while requesting tools list: {e!s}',
+                original_error=e,
+            )

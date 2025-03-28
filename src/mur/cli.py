@@ -6,6 +6,7 @@ import click
 from .commands.build_artifact import build_command
 from .commands.config_artifacts import config_command
 from .commands.install_artifacts import install_command
+from .commands.list_artifacts import list_command
 from .commands.new_artifact import new_command
 from .commands.publish_artifact import publish_command
 from .commands.uninstall_artifacts import uninstall_command
@@ -112,6 +113,6 @@ main.add_command(new_command())
 main.add_command(build_command())
 main.add_command(publish_command())
 main.add_command(config_command())
-
+main.add_command(list_command(), name='list')
 if __name__ == '__main__':
     main()
