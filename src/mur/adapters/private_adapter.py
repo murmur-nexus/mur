@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class PrivateRegistryAdapter(RegistryAdapter):
     """Adapter for private PyPI registry instances.
 
-    This adapter handles publishing artifacts to and retrieving package indexes from
+    This adapter handles publishing artifacts to and retrieving artifact indexes from
     private PyPI registries.
 
     Args:
@@ -112,14 +112,14 @@ class PrivateRegistryAdapter(RegistryAdapter):
         except Exception as e:
             raise MurError(200, f'Upload failed: {e!s}')
 
-    def get_package_indexes(self) -> list[str]:
-        """Get package indexes from .murmurrc configuration file.
+    def get_artifact_indexes(self) -> list[str]:
+        """Get artifact indexes from .murmurrc configuration file.
 
-        Reads package index URLs from the .murmurrc configuration file, looking first
+        Reads artifact index URLs from the .murmurrc configuration file, looking first
         for a local file in the current directory, then falling back to the global config.
 
         Returns:
-            list[str]: List of package index URLs with primary index first.
+            list[str]: List of artifact index URLs with primary index first.
 
         Raises:
             MurError: If no private registry URL is configured (807) or if reading configuration fails.

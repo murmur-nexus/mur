@@ -107,6 +107,7 @@ class Account(BaseModel):
     updated_at: str
     created_at: str
     name: str
+    scope: str
 
 
 # Update this model to be a list type alias instead of a wrapper

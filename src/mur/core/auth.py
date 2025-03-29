@@ -367,9 +367,8 @@ class AuthenticationManager:
                     message='Failed to fetch user accounts',
                     detail=f'Server returned status code {response.status_code}',
                 )
-
             # Extract account names from the list of Account objects
-            account_names = [account.name for account in response.data]
+            account_names = [account.scope for account in response.data]
 
             # Save account names to config
             self._save_user_accounts(account_names)

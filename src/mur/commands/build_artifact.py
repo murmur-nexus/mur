@@ -1,11 +1,12 @@
 import logging
+import re
 import shutil
 from pathlib import Path
 
 import click
 
 from ..core.config import ConfigManager
-from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_package_name
+from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_artifact_name
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
 from .base import ArtifactCommand
@@ -28,11 +29,12 @@ class BuildCommand(ArtifactCommand):
         config (dict): The build configuration (alias for build_manifest).
     """
 
-    def __init__(self, verbose: bool = False) -> None:
+    def __init__(self, verbose: bool = False, scope: str | None = None) -> None:
         """Initialize build command.
 
         Args:
             verbose: Whether to enable verbose output
+            scope: Scope for the artifact (alphanumeric only, will be converted to lowercase)
 
         Raises:
             MurError: If initialization fails
@@ -40,22 +42,22 @@ class BuildCommand(ArtifactCommand):
         try:
             super().__init__('build', verbose)
             self.verbose = verbose
-            self.scope = None
+            self.scope = scope  # update scope in parent
 
             # Load and validate manifest
             self.build_manifest = self._load_build_manifest()
             self.artifact_type = self._validate_artifact_type(self.build_manifest.get('type', ''))
 
             if not self.is_private_registry:
-                self._ensure_authenticated()
-                self._set_scope_from_accounts()
+                if self.scope is None:
+                    self._get_scope_from_user()
 
         except Exception as e:
             if not isinstance(e, MurError):
                 raise MurError(code=207, message=str(e), original_error=e)
             raise
 
-    def _set_scope_from_accounts(self) -> None:
+    def _get_scope_from_user(self) -> None:
         """Set scope from user accounts.
 
         Loads user accounts from config and prompts user to select one if multiple exist.
@@ -68,18 +70,15 @@ class BuildCommand(ArtifactCommand):
             config = config_manager.get_config()
             user_accounts = config.get('user_accounts', [])
 
-            if not user_accounts:
-                raise MurError(
-                    code=507,
-                    message='No user accounts found',
-                    detail='At least one user account is required. Please create an account first.',
-                )
-
-            # Prompt user to select account if multiple exist
-            if len(user_accounts) > 1:
+            if user_accounts and len(user_accounts) > 1:
                 self.scope = click.prompt('Select account', type=click.Choice(user_accounts), show_choices=True)
             else:
-                self.scope = user_accounts[0]
+                if not user_accounts:
+                    raise MurError(
+                        code=310,
+                        message='No scope specified',
+                        detail="Please use 'mur build --scope <scope>' to specify a scope for building a public artifact",
+                    )
         except Exception as e:
             if not isinstance(e, MurError):
                 raise MurError(
@@ -137,8 +136,8 @@ class BuildCommand(ArtifactCommand):
     def _create_directory_structure(self, artifact_path: Path) -> None:
         """Create the artifact directory structure.
 
-        Creates the necessary package directories and files for the artifact,
-        including the murmur namespace package structure and source files.
+        Creates the necessary artifact directories and files for the artifact,
+        including the murmur namespace artifact structure and source files.
         If source files exist in the current directory, they will be copied over.
         If no source files exist, a default main.py will be created.
 
@@ -150,15 +149,17 @@ class BuildCommand(ArtifactCommand):
                 or source file copying fails.
         """
         try:
-            # Create murmur namespace package structure
-            src_path = artifact_path / 'src' / 'murmur' / f'{self.artifact_type}s'
+            # Create murmur namespace artifact structure
+            src_path = artifact_path / 'src' / 'murmur' / 'artifacts'
             src_path.mkdir(parents=True, exist_ok=True)
 
-            package_path = src_path / artifact_path.name
-            package_path.mkdir(parents=True, exist_ok=True)
+            artifact_name = artifact_path.name
+            artifact_path = Path(f'{self.scope}_{artifact_name}' if self.scope else artifact_name)
+            namespace_path = src_path / artifact_path
+            namespace_path.mkdir(parents=True, exist_ok=True)
 
             # Create an empty __init__.py
-            with open(package_path / '__init__.py', 'w') as f:
+            with open(namespace_path / '__init__.py', 'w') as f:
                 pass
 
             logger.debug(f'Created directory structure at {artifact_path}')
@@ -173,16 +174,16 @@ class BuildCommand(ArtifactCommand):
                         detail='Source files found but main.py is missing. main.py is required as the default entry point.',
                     )
                 elif (main_file := self.current_dir / 'src' / 'main.py').exists():
-                    shutil.copy(main_file, package_path)
+                    shutil.copy(main_file, namespace_path)
                     if self.verbose:
                         logger.info('Copying source files...')
-                    logger.debug(f'Copied main.py to {package_path}')
+                    logger.debug(f'Copied main.py to {namespace_path}')
             else:
                 # Create default main.py if no source files exist
-                with open(package_path / 'main.py', 'w') as f:
+                with open(namespace_path / 'main.py', 'w') as f:
                     f.write('from murmur.build import ActivateAgent\n\n')
-                    f.write(f"{artifact_path.name} = ActivateAgent('{artifact_path.name}')\n")
-                logger.debug(f'Created default main.py with {artifact_path.name} function')
+                    f.write(f"{artifact_name} = ActivateAgent('{artifact_name}')\n")
+                logger.debug(f'Created default main.py with {artifact_name} function')
 
         except Exception as e:
             raise MurError(code=209, message='Failed to create directory structure', original_error=e)
@@ -380,7 +381,7 @@ class BuildCommand(ArtifactCommand):
         """
         return ['', '[tool.hatch.build.targets.wheel]', 'packages = ["src/murmur"]']
 
-    def _write_filtered_build_manifest(self, artifact_path: Path) -> None:
+    def _write_filtered_build_manifest(self, artifact_name: Path) -> None:
         """Filter and write configuration to murmur-build.yaml.
 
         Writes a filtered version of the configuration to the artifact's
@@ -388,7 +389,7 @@ class BuildCommand(ArtifactCommand):
         artifact type. For agents, this includes the 'instructions' key.
 
         Args:
-            artifact_path (Path): Path to new artifact.
+            artifact_name (Path): Path to new artifact.
 
         Raises:
             MurError: If writing config fails.
@@ -402,10 +403,12 @@ class BuildCommand(ArtifactCommand):
 
         filtered_config = {k: v for k, v in self.build_manifest.items() if k in allowed_keys}
 
-        package_entry_path = artifact_path / 'src' / 'murmur' / f'{self.artifact_type}s' / artifact_path.name
+        name = f'{self.scope}_{artifact_name.name}' if self.scope is not None else artifact_name.name
+
+        artifact_entry_path = artifact_name / 'src' / 'murmur' / 'artifacts' / name
 
         try:
-            with open(package_entry_path / 'murmur-build.yaml', 'w') as f:
+            with open(artifact_entry_path / 'murmur-build.yaml', 'w') as f:
                 f.write('# This file is automatically generated based on murmur-build.yaml in the parent directory\n')
                 self.yaml.dump(filtered_config, f)
 
@@ -413,19 +416,19 @@ class BuildCommand(ArtifactCommand):
         except Exception as e:
             raise MurError(code=205, message='Failed to write murmur-build.yaml', original_error=e)
 
-    def _build_package(self, artifact_path: Path) -> None:
-        """Build the package for publishing.
+    def _build_artifact(self, artifact_path: Path) -> None:
+        """Build the artifact for publishing.
 
         Args:
             artifact_path: Path to the artifact directory containing pyproject.toml
 
         Raises:
-            MurError: If the package build process fails.
+            MurError: If the artifact build process fails.
         """
         try:
             builder = ArtifactBuilder(artifact_path, self.verbose)
             result = builder.build(self.artifact_type)
-            logger.debug(f"Built package files: {', '.join(result.package_files)}")
+            logger.debug(f"Built artifact files: {', '.join(result.distribution_files)}")
         except MurError as e:
             e.handle()
             raise
@@ -445,7 +448,7 @@ class BuildCommand(ArtifactCommand):
             is_valid_artifact_name_version(self.build_manifest['name'], self.build_manifest['version'])
 
             # Determine artifact path
-            artifact_name = normalize_package_name(self.build_manifest['name'])
+            artifact_name = normalize_artifact_name(self.build_manifest['name'])
             artifact_path = self.current_dir / artifact_name
 
             if artifact_path.exists():
@@ -464,7 +467,7 @@ class BuildCommand(ArtifactCommand):
                 self._create_directory_structure(artifact_path)
                 self._create_project_files(artifact_path)
                 self._write_filtered_build_manifest(artifact_path)
-                self._build_package(artifact_path)
+                self._build_artifact(artifact_path)
 
             finally:
                 if not (self.verbose or logger.getEffectiveLevel() <= logging.DEBUG):
@@ -488,10 +491,29 @@ def build_command() -> click.Command:
 
     @click.command()
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def build(verbose: bool) -> None:
+    @click.option(
+        '--scope', type=str, help='Scope for the artifact (alphanumeric only, will be converted to lowercase)'
+    )
+    def build(verbose: bool, scope: str | None = None) -> None:
         """Build a new artifact project."""
         try:
-            cmd = BuildCommand(verbose)
+            # Validate scope format if provided
+            if scope:
+                # Use regex to ensure only alphanumeric characters
+                if not re.match(r'^[a-zA-Z0-9]+$', scope):
+                    raise MurError(
+                        code=507,
+                        message='Invalid scope format',
+                        detail='Scope must contain only alphanumeric characters (no spaces, hyphens, or special characters).',
+                    )
+
+                # Convert to lowercase if provided
+                scope_value = scope.lower()
+            else:
+                scope_value = None
+
+            # Pass the scope to the BuildCommand constructor
+            cmd = BuildCommand(verbose=verbose, scope=scope_value)
             cmd.execute()
         except MurError as e:
             e.handle()

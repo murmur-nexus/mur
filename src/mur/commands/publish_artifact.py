@@ -3,7 +3,8 @@ from pathlib import Path
 
 import click
 
-from ..core.packaging import normalize_package_name
+from ..core.config import ConfigManager
+from ..core.packaging import normalize_artifact_name
 from ..utils.error_handler import MurError
 from .base import ArtifactCommand
 
@@ -29,8 +30,7 @@ class PublishCommand(ArtifactCommand):
         """
         try:
             super().__init__('publish', verbose)
-
-            self.scope: str | None = None
+            self.verbose = verbose
 
             if not self.is_private_registry:
                 self._ensure_authenticated()
@@ -61,20 +61,20 @@ class PublishCommand(ArtifactCommand):
             artifact_files (list[str]): List of artifact files to publish
 
         Raises:
-            MurError: If package names don't match normalized format
+            MurError: If artifact names don't match normalized format
         """
         try:
             if self.verbose:
                 logger.info('Publishing artifact...')
 
             # Validate artifact names in build files
-            normalized_name = normalize_package_name(self.manifest.name)
+            normalized_name = normalize_artifact_name(self.manifest.name)
             for file_name in artifact_files:
                 # Extract artifact name from file (everything before first dash)
                 artifact_name = file_name.split('-')[0]
                 # Remove scope if present before comparing
                 unscoped_artifact_name = self._remove_scope(artifact_name)
-                if normalize_package_name(unscoped_artifact_name) != normalized_name:
+                if normalize_artifact_name(unscoped_artifact_name) != normalized_name:
                     raise MurError(
                         code=603,
                         message='Invalid artifact name in build files',
@@ -123,7 +123,7 @@ class PublishCommand(ArtifactCommand):
         dist_dir = self.current_dir / 'dist'
         if not dist_dir.exists() or (not any(dist_dir.glob('*.whl')) and not any(dist_dir.glob('*.tar.gz'))):
             # Try artifact directory
-            normalized_artifact_name = normalize_package_name(self.manifest.name)
+            normalized_artifact_name = normalize_artifact_name(self.manifest.name)
             artifact_dir = self.current_dir / normalized_artifact_name / 'dist'
             if not artifact_dir.exists():
                 raise MurError(
@@ -143,26 +143,75 @@ class PublishCommand(ArtifactCommand):
 
         return dist_dir, artifact_files
 
+    def _get_valid_scope(self, artifact_files: list[str]) -> str | None:
+        """Determine the appropriate scope for the artifact.
+
+        In public flow, validates that artifact filenames start with a valid user account.
+        In private flow, scope remains None.
+
+        Args:
+            artifact_files: List of artifact filenames
+
+        Returns:
+            str | None: The validated scope or None for private registry
+
+        Raises:
+            MurError: If in public flow and no valid scope found in filenames
+        """
+        if self.is_private_registry:
+            return None
+
+        # Get user accounts from config
+        config = ConfigManager().get_config()
+        user_accounts = config.get('user_accounts', [])
+
+        if not user_accounts:
+            raise MurError(
+                code=507,
+                message='No user accounts found',
+                detail="Please authenticate with 'mur login' before publishing to public registry.",
+            )
+
+        # Check if any artifact file starts with a valid scope
+        for file_name in artifact_files:
+            parts = file_name.split('_', 1)
+            if len(parts) > 1 and parts[0] in user_accounts:
+                return parts[0]
+
+        # No valid scope found
+        error_detail = f"Artifact filenames must be prefixed with one of your accounts: {', '.join(user_accounts)}"
+
+        # Add scope info to error if we can extract it
+        first_file = artifact_files[0]
+        parts = first_file.split('_', 1)
+        if len(parts) > 1:
+            error_detail += (
+                "\nUse 'mur build --scope <scope>' replacing <scope> with one of your accounts. \n"
+                "Tip: Set default scope with 'mur config set public scope my-scope'"
+            )
+
+        raise MurError(code=310, message=f'Found unknown scope: {parts[0]}', detail=error_detail)
+
     def execute(self) -> None:
         """Execute the publish command.
 
         This method orchestrates the publishing process including:
         1. Determining the appropriate registry
-        2. Finding the previously built package files
+        2. Finding the previously built artifact files
         3. Publishing the files
 
         Raises:
             Exception: If any step of the publishing process fails
         """
         try:
-            # Find artifact files
+            # Validate and get scope based on registry type
             dist_dir, artifact_files = self._find_artifact_files()
-            self.scope = artifact_files[0].split('_')[0]
+            self.scope = self._get_valid_scope(artifact_files)
 
-            # Publish package files
+            # Publish artifact files
             self._publish_files(dist_dir, artifact_files)
 
-            normalized_artifact_name = normalize_package_name(self.manifest.name)
+            normalized_artifact_name = normalize_artifact_name(self.manifest.name)
             if self.is_private_registry:
                 artifact_name = normalized_artifact_name
             else:

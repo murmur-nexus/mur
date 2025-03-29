@@ -11,7 +11,7 @@ class RegistryAdapter(ABC):
     """Base adapter for registry interactions.
 
     This abstract class defines the interface for registry adapters that handle
-    artifact publishing and package index management.
+    artifact publishing and artifact index management.
 
     Args:
         verbose (bool, optional): Enable verbose logging output. Defaults to False.
@@ -44,8 +44,8 @@ class RegistryAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_package_indexes(self) -> list[str]:
-        """Get list of package index URLs for installation.
+    def get_artifact_indexes(self) -> list[str]:
+        """Get list of artifact index URLs for installation.
 
         Returns:
             list[str]: List of PyPI-compatible index URLs in priority order
