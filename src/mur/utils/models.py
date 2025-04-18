@@ -40,6 +40,8 @@ class ArtifactPublishRequest(BaseModel):
     name: str
     version: str
     type: str
+    scope: str
+    language: str
     description: Optional[str] = None
     author: Optional[str] = None
     metadata_version: Optional[str] = '2.1'

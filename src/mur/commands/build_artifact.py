@@ -5,8 +5,12 @@ from pathlib import Path
 
 import click
 
-from ..core.config import ConfigManager
-from ..core.packaging import ArtifactBuilder, is_valid_artifact_name_version, normalize_artifact_name
+from ..core.packaging import (
+    ArtifactBuilder,
+    ArtifactManifest,
+    is_valid_artifact_name_version,
+    normalize_artifact_name,
+)
 from ..utils.error_handler import MurError
 from ..utils.loading import Spinner
 from .base import ArtifactCommand
@@ -46,48 +50,47 @@ class BuildCommand(ArtifactCommand):
 
             # Load and validate manifest
             self.build_manifest = self._load_build_manifest()
+
+            # Update scope in manifest if provided via flag
+            if self.scope is not None:
+                self._update_build_manifest('scope', self.scope)
+
             self.artifact_type = self._validate_artifact_type(self.build_manifest.get('type', ''))
 
-            if not self.is_private_registry:
-                if self.scope is None:
-                    self._get_scope_from_user()
+            # Check if scope is needed for public registry
+            if not self.is_private_registry and self.scope is None:
+                self._get_scope_from_build_manifest()
 
         except Exception as e:
             if not isinstance(e, MurError):
                 raise MurError(code=207, message=str(e), original_error=e)
             raise
 
-    def _get_scope_from_user(self) -> None:
-        """Set scope from user accounts.
+    def _get_scope_from_build_manifest(self) -> None:
+        """Get scope from murmur-build.yaml or user accounts.
 
-        Loads user accounts from config and prompts user to select one if multiple exist.
+        First tries to read scope from murmur-build.yaml in current directory.
+        If not found, loads user accounts from config and prompts user to select one.
 
         Raises:
-            MurError: If no user accounts are found or if loading fails
+            MurError: If no scope is found in build manifest and no user accounts exist
         """
-        try:
-            config_manager = ConfigManager()
-            config = config_manager.get_config()
-            user_accounts = config.get('user_accounts', [])
+        build_manifest = self.current_dir / 'murmur-build.yaml'
 
-            if user_accounts and len(user_accounts) > 1:
-                self.scope = click.prompt('Select account', type=click.Choice(user_accounts), show_choices=True)
-            else:
-                if not user_accounts:
-                    raise MurError(
-                        code=310,
-                        message='No scope specified',
-                        detail="Please use 'mur build --scope <scope>' to specify a scope for building a public artifact",
-                    )
-        except Exception as e:
-            if not isinstance(e, MurError):
-                raise MurError(
-                    code=507,
-                    message='Failed to get user accounts',
-                    detail='Could not retrieve user accounts from configuration',
-                    original_error=e,
-                )
-            raise
+        if build_manifest.exists():
+            with open(build_manifest) as f:
+                manifest_data = self.yaml.load(f)
+                if manifest_data and isinstance(manifest_data, dict):
+                    scope = manifest_data.get('scope')
+                    if scope:
+                        self.scope = scope
+                        return
+
+        raise MurError(
+            code=310,
+            message='No scope specified',
+            detail="Please use 'mur build --scope <scope>' to specify a scope for building a public artifact",
+        )
 
     def _validate_artifact_type(self, artifact_type: str) -> str:
         """Validate the artifact type.
@@ -111,13 +114,13 @@ class BuildCommand(ArtifactCommand):
         return artifact_type
 
     def _load_build_manifest(self) -> dict:
-        """Load manifest from murmur-build.yaml.
+        """Load and validate manifest from murmur-build.yaml.
 
         Returns:
             dict: Manifest configuration dictionary.
 
         Raises:
-            MurError: If manifest file is missing or invalid YAML.
+            MurError: If manifest file is missing, invalid YAML, or missing required fields.
         """
         manifest_file = self.current_dir / 'murmur-build.yaml'
         if not manifest_file.exists():
@@ -128,10 +131,43 @@ class BuildCommand(ArtifactCommand):
             )
 
         try:
-            with open(manifest_file) as f:
-                return self.yaml.load(f)
+            # Use ArtifactManifest for proper validation
+            manifest = ArtifactManifest(manifest_file, is_build_manifest=True)
+            return manifest._manifest_data  # Access the validated raw data
         except Exception as e:
+            if isinstance(e, MurError):
+                raise
             raise MurError(code=205, message='Failed to load murmur-build.yaml', original_error=e)
+
+    def _update_build_manifest(self, key: str, value: str) -> None:
+        """Update a property in the build manifest and write back to file.
+
+        Args:
+            key: The property key to update
+            value: The value to set for the property
+
+        Raises:
+            MurError: If writing to manifest fails
+        """
+        try:
+            # Simply update or add the key-value pair
+            self.build_manifest[key] = value
+
+            # Write updated manifest back to file
+            build_manifest_path = self.current_dir / 'murmur-build.yaml'
+            with open(build_manifest_path, 'w') as f:
+                self.yaml.dump(self.build_manifest, f)
+
+            if self.verbose:
+                logger.info(f'Updated {key} in murmur-build.yaml to: {value}')
+
+        except Exception as e:
+            raise MurError(
+                code=205,
+                message='Failed to update murmur-build.yaml',
+                detail=f'Could not update {key} in build manifest',
+                original_error=e,
+            )
 
     def _create_directory_structure(self, artifact_path: Path) -> None:
         """Create the artifact directory structure.
@@ -255,7 +291,7 @@ class BuildCommand(ArtifactCommand):
             raise MurError(
                 code=507,
                 message='No scope set',
-                detail="A scope is required for publishing to the public registry. Please run 'mur login' first.",
+                detail="A scope is required for publishing to the public registry. Please run 'mur build --scope <scope>'.",
             )
         prefix = f'{self.scope}-' if not self.is_private_registry else ''
         artifact_name = f'{prefix}{self.build_manifest["name"]}'.lower()
@@ -395,7 +431,7 @@ class BuildCommand(ArtifactCommand):
             MurError: If writing config fails.
         """
         # Base allowed keys for all artifact types
-        allowed_keys = {'name', 'version', 'type', 'description', 'dependencies', 'metadata'}
+        allowed_keys = {'name', 'version', 'type', 'scope', 'language', 'description', 'dependencies', 'metadata'}
 
         # Add instructions key only for agent type
         if self.artifact_type == 'agent':

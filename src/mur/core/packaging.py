@@ -21,6 +21,8 @@ REQUIRED_MANIFEST_FIELDS = {'name', 'version'}  # Basic fields for installation 
 REQUIRED_BUILD_MANIFEST_FIELDS = REQUIRED_MANIFEST_FIELDS | {
     'type',
     'description',
+    'scope',
+    'language',
     'metadata',
 }
 
@@ -43,6 +45,8 @@ class ArtifactManifest:
         version: Artifact version string (required)
         type: Artifact type (required for build manifest)
         description: Artifact description (required for build manifest)
+        scope: Artifact scope
+        language: Programming language of the artifact (defaults to "python")
         dependencies: List of artifact dependencies (defaults to empty list)
 
         The following metadata fields are available as direct attributes when set:
@@ -80,6 +84,8 @@ class ArtifactManifest:
     type: str = field(init=False)
     version: str = field(init=False)
     description: str = field(init=False)
+    scope: str = field(init=False)
+    language: str = field(init=False)
     dependencies: list[str] = field(default_factory=list, init=False)
 
     # Hidden fields to store data internally
@@ -97,6 +103,8 @@ class ArtifactManifest:
         # Set core fields
         self.name = manifest_data['name']
         self.version = manifest_data['version']
+        self.scope = manifest_data.get('scope', '')
+        self.language = manifest_data.get('language', 'python')
 
         if self.is_build_manifest:
             self.type = manifest_data['type']
@@ -182,11 +190,14 @@ class ArtifactManifest:
 
         missing_fields = required_fields - set(manifest_data.keys())
 
+        logger.debug(f'required_fields: {required_fields}')
+        logger.debug(f'missing_fields: {missing_fields}')
+
         if missing_fields:
             raise MurError(
                 code=204,
                 message='Missing required fields',
-                detail=f"Missing fields: {', '.join(missing_fields)}.",
+                detail=f"Missing murmur-build.yaml fields: {', '.join(missing_fields)}.",
             )
 
         return manifest_data
@@ -203,6 +214,8 @@ class ArtifactManifest:
         data: dict[str, Any] = {
             'name': self.name,
             'version': self.version,
+            'scope': self.scope,
+            'language': self.language,
         }
 
         if self.is_build_manifest:

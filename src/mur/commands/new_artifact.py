@@ -1,9 +1,11 @@
 import logging
+import sys
 from typing import Literal
 
 import click
 from ruamel.yaml import YAML
 
+from ..core.config import ConfigManager
 from ..utils.error_handler import MurError
 from .base import ArtifactCommand
 
@@ -17,20 +19,66 @@ class NewArtifactCommand(ArtifactCommand):
     the necessary configuration files and directory structure.
     """
 
-    def __init__(self, artifact_type: Literal['agent', 'tool'], name: str | None = None, verbose: bool = False) -> None:
+    def __init__(
+        self,
+        artifact_type: Literal['agent', 'tool'],
+        name: str | None = None,
+        verbose: bool = False,
+        scope: str | None = None,
+    ) -> None:
         """Initialize new artifact command.
 
         Args:
             artifact_type: Type of artifact to create ('agent' or 'tool').
             name: Optional name for the artifact.
             verbose: Whether to enable verbose output.
+            scope: Optional scope for the artifact (required for public registry).
         """
-        self.verbose = verbose
-        self.current_dir = self.get_current_dir()
-        self.yaml = self._configure_yaml()
+        # Call parent initialization first
+        super().__init__(artifact_type, verbose)
+
+        # Then initialize own attributes
         self.artifact_type = artifact_type
         self.name = name
-        super().__init__(self.artifact_type, verbose)
+        self.verbose = verbose
+        self.scope = scope
+        self.yaml = self._configure_yaml()
+
+        # Check if scope is needed for public registry
+        if not self.is_private_registry and self.scope is None:
+            self._get_scope_from_user()
+
+    def _get_scope_from_user(self) -> None:
+        """Set scope from user accounts.
+
+        Loads user accounts from config and prompts user to select one if multiple exist.
+
+        Raises:
+            MurError: If no user accounts are found or if loading fails
+        """
+        try:
+            config_manager = ConfigManager()
+            config = config_manager.get_config()
+            user_accounts = config.get('user_accounts', [])
+
+            if user_accounts and len(user_accounts) > 0:
+                self.scope = click.prompt('Select account', type=click.Choice(user_accounts), show_choices=True)
+            else:
+                if not user_accounts:
+                    raise MurError(
+                        code=310,
+                        message='No scope specified',
+                        detail="Please use 'mur new --scope <scope>' to specify a scope for creating a public artifact",
+                    )
+        except Exception as e:
+            if not isinstance(e, MurError):
+                raise MurError(
+                    code=507,
+                    message='Failed to get user accounts',
+                    detail='Could not retrieve user accounts from configuration',
+                    original_error=e,
+                )
+            raise
 
     def _configure_yaml(self) -> YAML:
         """Configure YAML parser settings.
@@ -64,6 +112,8 @@ class NewArtifactCommand(ArtifactCommand):
             'name': self.name if self.name else '',
             'type': self.artifact_type,
             'version': '0.0.1',
+            'scope': self.scope if self.scope else '',
+            'language': 'python',
             'description': '',
             'instructions': ['You are a helpful assistant.'],
             'metadata': {
@@ -108,9 +158,6 @@ class NewArtifactCommand(ArtifactCommand):
         """Execute the new artifact command.
 
         Creates a new artifact by generating the necessary configuration files.
-
-        Raises:
-            click.ClickException: If artifact creation fails.
         """
         try:
             self._create_build_manifest()
@@ -131,7 +178,7 @@ def new_command() -> click.Command:
     proper argument validation and handling.
 
     Returns:
-        click.Command: Configured Click command for creating new artifacts.
+        click.Command: Configured Click command for creating new artifacts.`
     """
 
     def validate_name(ctx, param, value):
@@ -172,7 +219,12 @@ def new_command() -> click.Command:
     @click.argument('type', type=click.Choice(['agent', 'tool']))
     @click.argument('name', required=False, callback=validate_name)
     @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-    def new(type: str, name: str | None, verbose: bool) -> None:
+    @click.option(
+        '--scope',
+        type=str,
+        help='Scope for the artifact (required for public registry, will prompt if not provided and no default account exists)',
+    )
+    def new(type: str, name: str | None, verbose: bool, scope: str | None) -> None:
         """Create a new artifact project.
 
         Args:
@@ -180,12 +232,17 @@ def new_command() -> click.Command:
             name: Optional name for the artifact. Must contain only lowercase letters,
                 numbers, and single hyphens.
             verbose: Whether to enable verbose output.
+            scope: Optional scope for the artifact (required for public registry).
 
         Raises:
             click.BadParameter: If the provided name contains invalid characters or format.
         """
-        artifact_type: Literal['agent', 'tool'] = 'agent' if type == 'agent' else 'tool'
-        cmd = NewArtifactCommand(artifact_type, name, verbose)
-        cmd.execute()
+        try:
+            artifact_type: Literal['agent', 'tool'] = 'agent' if type == 'agent' else 'tool'
+            cmd = NewArtifactCommand(artifact_type, name, verbose, scope)
+            cmd.execute()
+        except MurError as e:
+            e.handle()
+            sys.exit(1)  # Exit cleanly after handling the error
 
     return new
